@@ -1,0 +1,37 @@
+# Unreal generated output
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# IDE/generated project files
+.vs/
+.vscode/
+*.code-workspace
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+Makefile
+CMakeLists.txt
+CMakeSettings.json
+compile_commands.json
+
+# Compiler artifacts
+*.o
+*.obj
+*.lo
+*.gch
+*.pch
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Unreal-generated IDE metadata
+.ignore
