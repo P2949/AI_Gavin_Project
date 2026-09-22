@@ -35,3 +35,7 @@ Thumbs.db
 
 # Unreal-generated IDE metadata
 .ignore
+
+# LLVM profiling output
+*.profraw
+*.profdata
