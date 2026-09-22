@@ -65,25 +65,51 @@ GitHub cannot provide a meaningful text diff for most Unreal binary assets, so i
 
 Unreal binary assets generally cannot be merged safely in the same way as C++ or configuration files.
 
-Before making substantial changes to a shared asset, especially:
+### Temporary Asset Ownership
+
+Before making substantial changes to a shared binary asset that another contributor may reasonably need to edit, announce temporary ownership to the team.
+
+Include:
 
 ```text
-.umap
-Blueprints
-StateTrees
-Animation Blueprints
-Data Assets
-Materials
-complex shared assets
+Asset: Content/path/to/asset.uasset
+Owner: <name>
+Branch: feature/example
+Work: short description
 ```
 
-coordinate with the team so that two people do not unknowingly make incompatible changes to the same file.
+This rule applies especially to:
+
+```text
+.umap files
+central or shared Blueprints
+StateTrees
+Animation Blueprints
+shared Data Assets
+shared Materials
+other complex shared assets
+```
+
+Once an asset has been claimed, other contributors should not independently edit the same file until the owner releases it or the contributors explicitly coordinate a handoff or shared editing plan.
+
+Ownership normally remains in effect until the related pull request is merged or abandoned. If ownership is released earlier, announce that clearly to the team.
+
+Before claiming an important shared asset, update from `main` so that work does not begin from an unnecessarily stale version.
 
 Maps and central gameplay Blueprints deserve particular care.
 
 If two branches modify the same binary asset, do not blindly resolve the conflict by selecting `ours` or `theirs`.
 
 Determine which work needs to survive and coordinate the resolution with the other contributor.
+
+### Pull Requests Containing Binary Assets
+
+When a pull request changes important Unreal binary assets:
+
+1. identify the important `.uasset` or `.umap` files in the pull request description;
+2. briefly describe what changed;
+3. state how the change was tested in Unreal Editor;
+4. when the binary change needs meaningful review, review it from a local checkout rather than relying only on GitHub's web diff.
 
 ## Moving and Renaming Unreal Assets
 
