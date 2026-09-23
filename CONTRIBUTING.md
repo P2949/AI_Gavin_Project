@@ -25,6 +25,38 @@ Then create a branch for the work.
 
 Do not develop directly on `main`.
 
+## Multi-User Editing
+
+Unreal Multi-User Editing may be used for short live collaboration sessions, particularly when contributors are working together on the same local network.
+
+Multi-User Editing supplements Git and Git LFS; it does not replace them.
+
+Before starting a shared session, every participant should:
+
+1. use Unreal Engine 5.8.2;
+2. update their local `main` branch;
+3. run `git lfs pull`;
+4. confirm that their working tree is clean; and
+5. confirm that everyone is starting from the same Git commit.
+
+A useful pre-session check is:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git lfs pull
+git status --short
+git rev-parse HEAD
+```
+
+The team should create a fresh Multi-User session for the live collaboration period rather than treating one session as a permanent development environment.
+
+At the end of the session, one designated contributor should persist the intended session changes, inspect the resulting files locally, and commit them through the normal branch and pull-request workflow.
+
+After the resulting work has been committed and shared through Git, the temporary Multi-User session can be removed.
+
+Do not use Multi-User Editing to bypass the repository's binary asset ownership or pull-request rules.
+
 ## Updating a Branch
 
 Before creating a new branch, update `main`.
