@@ -60,23 +60,11 @@ If the Editor cannot build the modules automatically, build the `AI_Gavin_Projec
 
 Do not commit generated build products after compiling.
 
-## Template and Reference Content
+## Template Content
 
-The existing `ThirdPerson`, `Variant_Combat`, `Variant_Platforming`, and `Variant_SideScrolling` content and corresponding variant C++ code come from Unreal Engine template and example content.
+The existing `ThirdPerson` and `Variant_*` content/code comes from Unreal Engine template and example content.
 
-They are currently retained as reference material and as a known-working baseline while the team decides the game's direction.
-
-In particular, some of the template variants contain working AI and StateTree examples that may be useful for understanding Unreal Engine systems. Their presence does not make them the architecture of this project.
-
-Do not place new project-owned gameplay, AI, Blueprint, StateTree, or level work inside the `ThirdPerson` or `Variant_*` directories merely because related example code already exists there.
-
-Project-owned Unreal content should instead live under:
-
-```text
-/Game/AI_Gavin/
-```
-
-The team will decide which template assets or code should eventually be retained, adapted, moved, or removed after the project direction has been agreed.
+It is currently retained as reference material and a working baseline. It should not be treated as the agreed architecture or design of the final project; the team will decide what to keep, replace, or remove.
 
 ## Platform Status
 
