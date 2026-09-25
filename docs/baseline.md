@@ -1,4 +1,4 @@
-### Starting ideas
+### Starting ideas / brainstorming
 
 # Game?
 
@@ -9,7 +9,7 @@ maybe real time, yes
 strategy, ish
 
 inspirations: 
-darkest dungeon, dnd, person series, italian comedy, undertale, deltarune
+darkest dungeon, dnd, persona series, italian comedy, undertale, deltarune
 
 barony.
 
@@ -17,9 +17,7 @@ the vibe would be something like a fist person dungeon crawler, very much real t
 
 enna dream barbcue.
 
-2d character and low poly. 
-
-or 3d chracters cause low poly is easy.
+3d chracters cause low poly is easy. (decided on 3d, we'll be fine)
 
 first person. 
 
@@ -36,7 +34,7 @@ the sandbox allow you to go to any encounter in any order. we will probably have
 each person will work on one encounter and make it unique, for that reason it is possible to use blueprints for it since only one person needs to change it. 
 
 
-passive regen, but if the player stay in place for too long we activate the AI and make it so the player bullshit. 
+passive regen, but if the player stay in place for too long we activate the AI and make it so it causes some issue for the player(each person could make a custom punish). 
 
 basic deliverable:
 
