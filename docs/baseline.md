@@ -34,7 +34,7 @@ the sandbox allow you to go to any encounter in any order. we will probably have
 each person will work on one encounter and make it unique, for that reason it is possible to use blueprints for it since only one person needs to change it. 
 
 
-passive regen, but if the player stay in place for too long we activate the AI and make it so it causes some issue for the player(each person could make a custom punish). 
+passive regen, but if the player stay in a room or stay out of combat for too long we activate the AI and make it so it causes some issue for the player(each person could make a custom punish). 
 
 basic deliverable:
 
