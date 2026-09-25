@@ -60,6 +60,16 @@ If the Editor cannot build the modules automatically, build the `AI_Gavin_Projec
 
 Do not commit generated build products after compiling.
 
+## Project Design
+
+The current agreed game design is documented in:
+
+`docs/game_design.md`
+
+The original meeting and brainstorming notes are retained in:
+
+`docs/baseline.md`
+
 ## Template and Reference Content
 
 The existing `ThirdPerson`, `Variant_Combat`, `Variant_Platforming`, and `Variant_SideScrolling` content and corresponding variant C++ code come from Unreal Engine template and example content.
