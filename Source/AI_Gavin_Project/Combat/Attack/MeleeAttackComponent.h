@@ -33,6 +33,17 @@ class AI_GAVIN_PROJECT_API UMeleeAttackComponent : public UActorComponent
 public:
     UMeleeAttackComponent();
 
+    void SetDefaultAttackSettings(
+        const FMeleeAttackSettings &NewSettings)
+    {
+        DefaultAttackSettings = NewSettings;
+    }
+
+    const FMeleeAttackSettings &GetDefaultAttackSettings() const
+    {
+        return DefaultAttackSettings;
+    }
+
     UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
     bool TryStartAttack();
 
@@ -107,6 +118,11 @@ private:
     void SetAttackState(EMeleeAttackState NewState);
     void HandleWindupComplete();
     void PerformAttack();
+
+    void ApplyKnockback(
+        AActor *HitActor,
+        const FVector &HitDirection) const;
+
     void HandleRecoveryComplete();
 
     FTimerHandle WindupTimerHandle;

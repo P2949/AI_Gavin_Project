@@ -6,6 +6,7 @@
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -216,10 +217,58 @@ void UMeleeAttackComponent::PerformAttack()
             Owner,
             ActiveAttackSettings.DamageTypeClass);
 
+    ApplyKnockback(
+        HitActor,
+        HitDirection);
+
     OnAttackHit.Broadcast(
         HitActor,
         HitResult,
         AppliedDamage);
+}
+
+void UMeleeAttackComponent::ApplyKnockback(
+    AActor *HitActor,
+    const FVector &HitDirection) const
+{
+    ACharacter *HitCharacter = Cast<ACharacter>(HitActor);
+
+    if (!HitCharacter)
+    {
+        return;
+    }
+
+    const float HorizontalVelocity =
+        FMath::Max(
+            ActiveAttackSettings.KnockbackHorizontalVelocity,
+            0.0f);
+
+    const float VerticalVelocity =
+        FMath::Max(
+            ActiveAttackSettings.KnockbackVerticalVelocity,
+            0.0f);
+
+    if (HorizontalVelocity <= 0.0f &&
+        VerticalVelocity <= 0.0f)
+    {
+        return;
+    }
+
+    const FVector HorizontalDirection =
+        FVector(
+            HitDirection.X,
+            HitDirection.Y,
+            0.0f)
+            .GetSafeNormal();
+
+    const FVector LaunchVelocity =
+        HorizontalDirection * HorizontalVelocity +
+        FVector::UpVector * VerticalVelocity;
+
+    HitCharacter->LaunchCharacter(
+        LaunchVelocity,
+        HorizontalVelocity > 0.0f,
+        VerticalVelocity > 0.0f);
 }
 
 void UMeleeAttackComponent::HandleRecoveryComplete()

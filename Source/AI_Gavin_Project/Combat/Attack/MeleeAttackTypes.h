@@ -56,6 +56,20 @@ struct AI_GAVIN_PROJECT_API FMeleeAttackSettings
     UPROPERTY(
         EditAnywhere,
         BlueprintReadWrite,
+        Category = "Attack|Knockback",
+        meta = (ClampMin = "0.0", Units = "cm/s"))
+    float KnockbackHorizontalVelocity = 0.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
+        Category = "Attack|Knockback",
+        meta = (ClampMin = "0.0", Units = "cm/s"))
+    float KnockbackVerticalVelocity = 0.0f;
+
+    UPROPERTY(
+        EditAnywhere,
+        BlueprintReadWrite,
         Category = "Attack")
     TSubclassOf<UDamageType> DamageTypeClass;
 
