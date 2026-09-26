@@ -5,6 +5,7 @@
 #include "MainPlayerCharacter.generated.h"
 
 class UCameraComponent;
+class UHealthComponent;
 class UInputAction;
 struct FInputActionValue;
 
@@ -36,6 +37,10 @@ protected:
 	virtual void SetupPlayerInputComponent(
 		UInputComponent* PlayerInputComponent
 	) override;
+
+	// Player health state.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UHealthComponent> HealthComponent;
 
 private:
 	void Move(const FInputActionValue& Value);
