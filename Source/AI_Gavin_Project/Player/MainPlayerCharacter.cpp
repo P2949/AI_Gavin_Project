@@ -1,6 +1,5 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Player/MainPlayerCharacter.h"
 
 #include "Camera/CameraComponent.h"
@@ -9,6 +8,10 @@
 
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
+
+#include "Combat/Attack/MeleeAttackComponent.h"
+#include "Combat/Defense/DefenseComponent.h"
+#include "Components/SceneComponent.h"
 
 // Sets default values
 AMainPlayerCharacter::AMainPlayerCharacter()
@@ -35,20 +38,50 @@ AMainPlayerCharacter::AMainPlayerCharacter()
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
 
 	FirstPersonCamera->SetRelativeLocation(
-		FVector(0.0f, 0.0f, BaseEyeHeight)
-	);
+		FVector(0.0f, 0.0f, BaseEyeHeight));
 
 	FirstPersonCamera->bUsePawnControlRotation = true;
+
+	// Player melee attacks originate from the first-person view.
+	MeleeAttackOrigin =
+		CreateDefaultSubobject<USceneComponent>(TEXT("MeleeAttackOrigin"));
+
+	MeleeAttackOrigin->SetupAttachment(FirstPersonCamera);
+
+	// Reusable attack mechanics.
+	MeleeAttackComponent =
+		CreateDefaultSubobject<UMeleeAttackComponent>(
+			TEXT("MeleeAttackComponent"));
+
+	MeleeAttackComponent->SetAttackOriginComponent(MeleeAttackOrigin);
+}
+
+void AMainPlayerCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (UDefenseComponent *Defense = GetDefenseComponent())
+	{
+		Defense->OnBlockingChanged.AddDynamic(
+			this,
+			&AMainPlayerCharacter::HandleBlockingChanged);
+	}
+
+	if (MeleeAttackComponent)
+	{
+		MeleeAttackComponent->OnAttackStateChanged.AddDynamic(
+			this,
+			&AMainPlayerCharacter::HandleAttackStateChanged);
+	}
 }
 
 // Called to bind player input
 void AMainPlayerCharacter::SetupPlayerInputComponent(
-	UInputComponent* PlayerInputComponent
-)
+	UInputComponent *PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	UEnhancedInputComponent* EnhancedInputComponent =
+	UEnhancedInputComponent *EnhancedInputComponent =
 		Cast<UEnhancedInputComponent>(PlayerInputComponent);
 
 	if (!EnhancedInputComponent)
@@ -56,8 +89,7 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 		UE_LOG(
 			LogTemp,
 			Error,
-			TEXT("MainPlayerCharacter requires an EnhancedInputComponent.")
-		);
+			TEXT("MainPlayerCharacter requires an EnhancedInputComponent."));
 
 		return;
 	}
@@ -68,8 +100,7 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 			MoveAction,
 			ETriggerEvent::Triggered,
 			this,
-			&AMainPlayerCharacter::Move
-		);
+			&AMainPlayerCharacter::Move);
 	}
 
 	if (LookAction)
@@ -78,8 +109,7 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 			LookAction,
 			ETriggerEvent::Triggered,
 			this,
-			&AMainPlayerCharacter::Look
-		);
+			&AMainPlayerCharacter::Look);
 	}
 
 	if (JumpAction)
@@ -88,19 +118,47 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 			JumpAction,
 			ETriggerEvent::Started,
 			this,
-			&ACharacter::Jump
-		);
+			&ACharacter::Jump);
 
 		EnhancedInputComponent->BindAction(
 			JumpAction,
 			ETriggerEvent::Completed,
 			this,
-			&ACharacter::StopJumping
-		);
+			&ACharacter::StopJumping);
+	}
+
+	if (AttackAction)
+	{
+		EnhancedInputComponent->BindAction(
+			AttackAction,
+			ETriggerEvent::Started,
+			this,
+			&AMainPlayerCharacter::StartAttack);
+	}
+
+	if (BlockAction)
+	{
+		EnhancedInputComponent->BindAction(
+			BlockAction,
+			ETriggerEvent::Started,
+			this,
+			&AMainPlayerCharacter::StartBlocking);
+
+		EnhancedInputComponent->BindAction(
+			BlockAction,
+			ETriggerEvent::Completed,
+			this,
+			&AMainPlayerCharacter::StopBlocking);
+
+		EnhancedInputComponent->BindAction(
+			BlockAction,
+			ETriggerEvent::Canceled,
+			this,
+			&AMainPlayerCharacter::StopBlocking);
 	}
 }
 
-void AMainPlayerCharacter::Move(const FInputActionValue& Value)
+void AMainPlayerCharacter::Move(const FInputActionValue &Value)
 {
 	const FVector2D MovementInput = Value.Get<FVector2D>();
 
@@ -114,8 +172,7 @@ void AMainPlayerCharacter::Move(const FInputActionValue& Value)
 	const FRotator YawRotation(
 		0.0f,
 		ControlRotation.Yaw,
-		0.0f
-	);
+		0.0f);
 
 	const FVector ForwardDirection =
 		FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
@@ -125,19 +182,104 @@ void AMainPlayerCharacter::Move(const FInputActionValue& Value)
 
 	AddMovementInput(
 		ForwardDirection,
-		MovementInput.Y
-	);
+		MovementInput.Y);
 
 	AddMovementInput(
 		RightDirection,
-		MovementInput.X
-	);
+		MovementInput.X);
 }
 
-void AMainPlayerCharacter::Look(const FInputActionValue& Value)
+void AMainPlayerCharacter::Look(const FInputActionValue &Value)
 {
 	const FVector2D LookInput = Value.Get<FVector2D>();
 
 	AddControllerYawInput(LookInput.X);
 	AddControllerPitchInput(LookInput.Y);
+}
+
+void AMainPlayerCharacter::StartAttack()
+{
+	if (MeleeAttackComponent)
+	{
+		MeleeAttackComponent->TryStartAttack();
+	}
+}
+
+void AMainPlayerCharacter::StartBlocking()
+{
+	bBlockInputHeld = true;
+
+	if (MeleeAttackComponent &&
+		MeleeAttackComponent->IsAttackInProgress())
+	{
+		return;
+	}
+
+	if (UDefenseComponent *Defense = GetDefenseComponent())
+	{
+		Defense->SetBlocking(true);
+	}
+}
+
+void AMainPlayerCharacter::StopBlocking()
+{
+	bBlockInputHeld = false;
+
+	if (UDefenseComponent *Defense = GetDefenseComponent())
+	{
+		Defense->SetBlocking(false);
+	}
+}
+
+void AMainPlayerCharacter::HandleAttackStateChanged(
+	EMeleeAttackState OldState,
+	EMeleeAttackState NewState)
+{
+	static_cast<void>(OldState);
+
+	UDefenseComponent *Defense = GetDefenseComponent();
+
+	if (!Defense)
+	{
+		return;
+	}
+
+	if (NewState == EMeleeAttackState::Windup)
+	{
+		Defense->SetBlocking(false);
+		return;
+	}
+
+	if (NewState == EMeleeAttackState::Ready &&
+		bBlockInputHeld)
+	{
+		Defense->SetBlocking(true);
+	}
+}
+
+void AMainPlayerCharacter::HandleBlockingChanged(bool bIsBlocking)
+{
+	UCharacterMovementComponent *Movement =
+		GetCharacterMovement();
+
+	if (!Movement)
+	{
+		return;
+	}
+
+	if (bIsBlocking)
+	{
+		WalkSpeedBeforeBlocking = Movement->MaxWalkSpeed;
+
+		Movement->MaxWalkSpeed =
+			WalkSpeedBeforeBlocking * BlockingMovementSpeedMultiplier;
+
+		return;
+	}
+
+	if (WalkSpeedBeforeBlocking > 0.0f)
+	{
+		Movement->MaxWalkSpeed = WalkSpeedBeforeBlocking;
+		WalkSpeedBeforeBlocking = 0.0f;
+	}
 }

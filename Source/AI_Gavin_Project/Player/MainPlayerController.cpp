@@ -13,48 +13,48 @@ void AMainPlayerController::BeginPlay()
 		return;
 	}
 
-	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	ULocalPlayer *LocalPlayer = GetLocalPlayer();
 
 	if (!LocalPlayer)
 	{
 		UE_LOG(
 			LogTemp,
 			Error,
-			TEXT("MainPlayerController could not find a LocalPlayer.")
-		);
+			TEXT("MainPlayerController could not find a LocalPlayer."));
 
 		return;
 	}
 
-	UEnhancedInputLocalPlayerSubsystem* InputSubsystem =
+	UEnhancedInputLocalPlayerSubsystem *InputSubsystem =
 		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(
-			LocalPlayer
-		);
+			LocalPlayer);
 
 	if (!InputSubsystem)
 	{
 		UE_LOG(
 			LogTemp,
 			Error,
-			TEXT("MainPlayerController could not find the Enhanced Input subsystem.")
-		);
+			TEXT("MainPlayerController could not find the Enhanced Input subsystem."));
 
 		return;
 	}
 
-	if (!DefaultMappingContext)
+	for (const FInputMappingContextConfig &MappingConfig : DefaultMappingContexts)
 	{
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("MainPlayerController has no default input mapping context.")
-		);
+		if (!MappingConfig.MappingContext)
+		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT(
+					"MainPlayerController has an invalid "
+					"default input mapping context."));
 
-		return;
+			continue;
+		}
+
+		InputSubsystem->AddMappingContext(
+			MappingConfig.MappingContext,
+			MappingConfig.Priority);
 	}
-
-	InputSubsystem->AddMappingContext(
-		DefaultMappingContext,
-		0
-	);
 }
