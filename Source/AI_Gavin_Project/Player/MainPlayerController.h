@@ -2,9 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Player/Input/InputMappingContextConfig.h"
 #include "MainPlayerController.generated.h"
-
-class UInputMappingContext;
 
 UCLASS()
 class AI_GAVIN_PROJECT_API AMainPlayerController : public APlayerController
@@ -14,6 +13,9 @@ class AI_GAVIN_PROJECT_API AMainPlayerController : public APlayerController
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	TObjectPtr<UInputMappingContext> DefaultMappingContext;
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Input")
+	TArray<FInputMappingContextConfig> DefaultMappingContexts;
 };

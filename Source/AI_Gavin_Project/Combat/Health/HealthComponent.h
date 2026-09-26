@@ -15,16 +15,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	float,
 	NewHealth,
 	float,
-	Delta
-);
+	Delta);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnDeathSignature,
-	AActor*,
-	DamageCauser
-);
+	AActor *,
+	DamageCauser);
 
-UCLASS(ClassGroup=(Combat), meta=(BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
 class AI_GAVIN_PROJECT_API UHealthComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -47,8 +45,8 @@ public:
 	float GetHealthNormalized() const
 	{
 		return MaxHealth > 0.0f
-			? CurrentHealth / MaxHealth
-			: 0.0f;
+				   ? CurrentHealth / MaxHealth
+				   : 0.0f;
 	}
 
 	UFUNCTION(BlueprintPure, Category = "Health")
@@ -71,22 +69,20 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Health", meta=(ClampMin="1.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Health", meta = (ClampMin = "1.0"))
 	float MaxHealth = 100.0f;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Health")
 	float CurrentHealth = 0.0f;
 	UFUNCTION()
 	void HandleTakeAnyDamage(
-		AActor* DamagedActor,
+		AActor *DamagedActor,
 		float Damage,
-		const UDamageType* DamageType,
-		AController* InstigatedBy,
-		AActor* DamageCauser
-	);
+		const UDamageType *DamageType,
+		AController *InstigatedBy,
+		AActor *DamageCauser);
 
 	void SetCurrentHealth(
 		float NewHealth,
-		AActor* DamageCauser = nullptr
-	);
+		AActor *DamageCauser = nullptr);
 };

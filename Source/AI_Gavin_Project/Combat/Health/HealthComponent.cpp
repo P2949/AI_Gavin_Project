@@ -12,22 +12,20 @@ void UHealthComponent::BeginPlay()
 	MaxHealth = FMath::Max(MaxHealth, 1.0f);
 	CurrentHealth = MaxHealth;
 
-	if (AActor* Owner = GetOwner())
+	if (AActor *Owner = GetOwner())
 	{
 		Owner->OnTakeAnyDamage.AddDynamic(
 			this,
-			&UHealthComponent::HandleTakeAnyDamage
-		);
+			&UHealthComponent::HandleTakeAnyDamage);
 	}
 }
 
 void UHealthComponent::HandleTakeAnyDamage(
-	AActor* DamagedActor,
+	AActor *DamagedActor,
 	float Damage,
-	const UDamageType* DamageType,
-	AController* InstigatedBy,
-	AActor* DamageCauser
-)
+	const UDamageType *DamageType,
+	AController *InstigatedBy,
+	AActor *DamageCauser)
 {
 	if (Damage <= 0.0f || IsDead())
 	{
@@ -36,8 +34,7 @@ void UHealthComponent::HandleTakeAnyDamage(
 
 	SetCurrentHealth(
 		CurrentHealth - Damage,
-		DamageCauser
-	);
+		DamageCauser);
 }
 
 void UHealthComponent::Heal(float Amount)
@@ -48,8 +45,7 @@ void UHealthComponent::Heal(float Amount)
 	}
 
 	SetCurrentHealth(
-		CurrentHealth + Amount
-	);
+		CurrentHealth + Amount);
 }
 
 void UHealthComponent::ResetHealth()
@@ -59,16 +55,14 @@ void UHealthComponent::ResetHealth()
 
 void UHealthComponent::SetCurrentHealth(
 	float NewHealth,
-	AActor* DamageCauser
-)
+	AActor *DamageCauser)
 {
 	const float OldHealth = CurrentHealth;
 
 	CurrentHealth = FMath::Clamp(
 		NewHealth,
 		0.0f,
-		MaxHealth
-	);
+		MaxHealth);
 
 	if (FMath::IsNearlyEqual(OldHealth, CurrentHealth))
 	{
@@ -78,8 +72,7 @@ void UHealthComponent::SetCurrentHealth(
 	OnHealthChanged.Broadcast(
 		OldHealth,
 		CurrentHealth,
-		CurrentHealth - OldHealth
-	);
+		CurrentHealth - OldHealth);
 
 	if (OldHealth > 0.0f && IsDead())
 	{
