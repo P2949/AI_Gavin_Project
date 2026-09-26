@@ -4,7 +4,6 @@
 #include "Player/MainPlayerCharacter.h"
 
 #include "Camera/CameraComponent.h"
-#include "Combat/Health/HealthComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
@@ -28,10 +27,6 @@ AMainPlayerCharacter::AMainPlayerCharacter()
 	GetCharacterMovement()->MaxWalkSpeed = 500.0f;
 	GetCharacterMovement()->JumpZVelocity = 500.0f;
 	GetCharacterMovement()->AirControl = 0.35f;
-
-	// Health.
-	HealthComponent =
-		CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
 
 	// First-person camera.
 	FirstPersonCamera =

@@ -1,16 +1,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
+#include "Combat/Characters/CombatantCharacter.h"
 #include "MainPlayerCharacter.generated.h"
 
 class UCameraComponent;
-class UHealthComponent;
 class UInputAction;
 struct FInputActionValue;
 
 UCLASS()
-class AI_GAVIN_PROJECT_API AMainPlayerCharacter : public ACharacter
+class AI_GAVIN_PROJECT_API AMainPlayerCharacter : public ACombatantCharacter
 {
 	GENERATED_BODY()
 
@@ -37,10 +36,6 @@ protected:
 	virtual void SetupPlayerInputComponent(
 		UInputComponent* PlayerInputComponent
 	) override;
-
-	// Player health state.
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UHealthComponent> HealthComponent;
 
 private:
 	void Move(const FInputActionValue& Value);
