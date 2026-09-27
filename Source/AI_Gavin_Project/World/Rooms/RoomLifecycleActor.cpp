@@ -65,6 +65,31 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
         return false;
     }
 
+    if (IsRoomCompleted())
+    {
+        return false;
+    }
+
+    if (IsRoomActive())
+    {
+        if (ActivePlayer.Get() == Player)
+        {
+            return true;
+        }
+
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT(
+                "RoomLifecycleActor '%s' is already active for "
+                "player '%s' and cannot switch to player '%s'."),
+            *GetName(),
+            *GetNameSafe(ActivePlayer.Get()),
+            *Player->GetName());
+
+        return false;
+    }
+
     if (!Cast<IRoomResettable>(Player))
     {
         UE_LOG(
@@ -96,8 +121,6 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
         return false;
     }
 
-    DeactivateRoom();
-
     ActivePlayer = Player;
     ActivePlayerHealthComponent = PlayerHealth;
     ActivePlayerResetTransform =
@@ -107,12 +130,37 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
         this,
         &ARoomLifecycleActor::HandleActivePlayerDeath);
 
-    bIsRoomActive = true;
+    SetRoomState(ERoomLifecycleState::Active);
 
     return true;
 }
 
 void ARoomLifecycleActor::DeactivateRoom()
+{
+    ClearActivePlayerTracking();
+    bResetPending = false;
+
+    if (IsRoomActive())
+    {
+        SetRoomState(ERoomLifecycleState::Inactive);
+    }
+}
+
+bool ARoomLifecycleActor::CompleteRoom()
+{
+    if (!IsRoomActive())
+    {
+        return false;
+    }
+
+    bResetPending = false;
+    ClearActivePlayerTracking();
+    SetRoomState(ERoomLifecycleState::Completed);
+
+    return true;
+}
+
+void ARoomLifecycleActor::ClearActivePlayerTracking()
 {
     if (UHealthComponent *PlayerHealth =
             ActivePlayerHealthComponent.Get())
@@ -124,9 +172,22 @@ void ARoomLifecycleActor::DeactivateRoom()
 
     ActivePlayer.Reset();
     ActivePlayerHealthComponent.Reset();
+}
 
-    bIsRoomActive = false;
-    bResetPending = false;
+void ARoomLifecycleActor::SetRoomState(
+    ERoomLifecycleState NewState)
+{
+    if (RoomState == NewState)
+    {
+        return;
+    }
+
+    const ERoomLifecycleState OldState = RoomState;
+    RoomState = NewState;
+
+    OnRoomStateChanged.Broadcast(
+        OldState,
+        RoomState);
 }
 
 bool ARoomLifecycleActor::RegisterResetParticipant(
@@ -196,7 +257,7 @@ bool ARoomLifecycleActor::UnregisterResetParticipant(
 
 void ARoomLifecycleActor::RequestRoomReset()
 {
-    if (!bIsRoomActive ||
+    if (!IsRoomActive() ||
         bResetPending)
     {
         return;
@@ -240,7 +301,7 @@ void ARoomLifecycleActor::PerformRoomReset()
 
     bResetPending = false;
 
-    if (!bIsRoomActive)
+    if (!IsRoomActive())
     {
         return;
     }

@@ -2,10 +2,18 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "World/Rooms/RoomLifecycleTypes.h"
 #include "RoomLifecycleActor.generated.h"
 
 class APawn;
 class UHealthComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FOnRoomLifecycleStateChanged,
+    ERoomLifecycleState,
+    OldState,
+    ERoomLifecycleState,
+    NewState);
 
 /**
  * Coordinates reset lifecycle for one room.
@@ -56,10 +64,38 @@ public:
      */
     void RequestRoomReset();
 
+    /**
+     * Permanently completes this room instance.
+     *
+     * Completion is accepted only while the room is Active.
+     * The reason for completion belongs to the caller.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Room|Lifecycle")
+    bool CompleteRoom();
+
+    UFUNCTION(BlueprintPure, Category = "Room|Lifecycle")
+    ERoomLifecycleState GetRoomState() const
+    {
+        return RoomState;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "Room|Lifecycle")
     bool IsRoomActive() const
     {
-        return bIsRoomActive;
+        return RoomState == ERoomLifecycleState::Active;
     }
+
+    UFUNCTION(BlueprintPure, Category = "Room|Lifecycle")
+    bool IsRoomCompleted() const
+    {
+        return RoomState == ERoomLifecycleState::Completed;
+    }
+
+    /**
+     * Broadcast whenever the high-level lifecycle state changes.
+     */
+    UPROPERTY(BlueprintAssignable, Category = "Room|Lifecycle")
+    FOnRoomLifecycleStateChanged OnRoomStateChanged;
 
 protected:
     virtual void BeginPlay() override;
@@ -112,6 +148,8 @@ private:
 
     void RegisterInitialResetParticipants();
     void PerformRoomReset();
+    void ClearActivePlayerTracking();
+    void SetRoomState(ERoomLifecycleState NewState);
 
     FTransform ResolvePlayerResetTransform(
         const APawn *Player) const;
@@ -123,6 +161,9 @@ private:
 
     FTransform ActivePlayerResetTransform;
 
-    bool bIsRoomActive = false;
+    UPROPERTY(VisibleInstanceOnly, Category = "Room|Lifecycle")
+    ERoomLifecycleState RoomState =
+        ERoomLifecycleState::Inactive;
+
     bool bResetPending = false;
 };
