@@ -5,6 +5,7 @@
 #include "Player/Locomotion/PlayerLocomotionTypes.h"
 #include "PlayerLocomotionComponent.generated.h"
 
+class ACharacter;
 class UCharacterMovementComponent;
 
 /**
@@ -48,9 +49,20 @@ public:
 	}
 
 	UFUNCTION(BlueprintPure, Category = "Player|Locomotion")
-	bool IsSprinting() const
+	bool IsSprinting() const;
+
+	/**
+	 * Records whether crouch is currently requested by the player.
+	 *
+	 * Unreal's CharacterMovement remains responsible for the actual
+	 * crouch transition and collision handling.
+	 */
+	void SetCrouchRequested(bool bRequested);
+
+	UFUNCTION(BlueprintPure, Category = "Player|Locomotion")
+	bool IsCrouchRequested() const
 	{
-		return bIsSprinting;
+		return bCrouchRequested;
 	}
 
 	/**
@@ -77,6 +89,7 @@ protected:
 	FPlayerLocomotionSettings LocomotionSettings;
 
 private:
+	ACharacter *ResolveCharacterOwner() const;
 	UCharacterMovementComponent *ResolveCharacterMovement() const;
 
 	void ApplyBaseMovementSettings();
@@ -85,6 +98,6 @@ private:
 	bool CanSprint() const;
 
 	bool bSprintRequested = false;
-	bool bIsSprinting = false;
+	bool bCrouchRequested = false;
 	bool bBlocking = false;
 };

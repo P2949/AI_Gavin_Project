@@ -34,6 +34,13 @@ struct AI_GAVIN_PROJECT_API FPlayerLocomotionSettings
 		BlueprintReadWrite,
 		Category = "Locomotion",
 		meta = (ClampMin = "0.0", Units = "cm/s"))
+	float CrouchSpeed = 250.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Locomotion",
+		meta = (ClampMin = "0.0", Units = "cm/s"))
 	float JumpZVelocity = 500.0f;
 
 	UPROPERTY(

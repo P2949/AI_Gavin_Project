@@ -65,6 +65,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> SprintAction;
 
+	// Hold-to-crouch input.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> CrouchAction;
+
 	// Primary attack input.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> AttackAction;
@@ -89,6 +93,9 @@ private:
 
 	void StartSprinting();
 	void StopSprinting();
+
+	void StartCrouching();
+	void StopCrouching();
 
 	void StartBlocking();
 	void StopBlocking();

@@ -222,6 +222,27 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 			&AMainPlayerCharacter::StopSprinting);
 	}
 
+	if (CrouchAction)
+	{
+		EnhancedInputComponent->BindAction(
+			CrouchAction,
+			ETriggerEvent::Started,
+			this,
+			&AMainPlayerCharacter::StartCrouching);
+
+		EnhancedInputComponent->BindAction(
+			CrouchAction,
+			ETriggerEvent::Completed,
+			this,
+			&AMainPlayerCharacter::StopCrouching);
+
+		EnhancedInputComponent->BindAction(
+			CrouchAction,
+			ETriggerEvent::Canceled,
+			this,
+			&AMainPlayerCharacter::StopCrouching);
+	}
+
 	if (AttackAction)
 	{
 		EnhancedInputComponent->BindAction(
@@ -361,6 +382,28 @@ void AMainPlayerCharacter::StopSprinting()
 	if (LocomotionComponent)
 	{
 		LocomotionComponent->SetSprintRequested(false);
+	}
+}
+
+void AMainPlayerCharacter::StartCrouching()
+{
+	const UHealthComponent *Health =
+		GetHealthComponent();
+
+	if ((Health && Health->IsDead()) ||
+		!LocomotionComponent)
+	{
+		return;
+	}
+
+	LocomotionComponent->SetCrouchRequested(true);
+}
+
+void AMainPlayerCharacter::StopCrouching()
+{
+	if (LocomotionComponent)
+	{
+		LocomotionComponent->SetCrouchRequested(false);
 	}
 }
 

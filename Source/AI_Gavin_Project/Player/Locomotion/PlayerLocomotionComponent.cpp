@@ -29,9 +29,45 @@ void UPlayerLocomotionComponent::SetSprintRequested(
 	RefreshLocomotionState();
 }
 
+bool UPlayerLocomotionComponent::IsSprinting() const
+{
+	const UCharacterMovementComponent *Movement =
+		ResolveCharacterMovement();
+
+	return Movement &&
+		CanSprint() &&
+		!Movement->IsCrouching();
+}
+
+void UPlayerLocomotionComponent::SetCrouchRequested(
+	bool bRequested)
+{
+	if (bCrouchRequested == bRequested)
+	{
+		return;
+	}
+
+	bCrouchRequested = bRequested;
+
+	if (ACharacter *CharacterOwner = ResolveCharacterOwner())
+	{
+		if (bCrouchRequested)
+		{
+			CharacterOwner->Crouch();
+		}
+		else
+		{
+			CharacterOwner->UnCrouch();
+		}
+	}
+
+	RefreshLocomotionState();
+}
+
 void UPlayerLocomotionComponent::ResetTransientState()
 {
 	SetSprintRequested(false);
+	SetCrouchRequested(false);
 }
 
 void UPlayerLocomotionComponent::SetBlockingState(
@@ -47,11 +83,17 @@ void UPlayerLocomotionComponent::SetBlockingState(
 	RefreshLocomotionState();
 }
 
+ACharacter *
+UPlayerLocomotionComponent::ResolveCharacterOwner() const
+{
+	return Cast<ACharacter>(GetOwner());
+}
+
 UCharacterMovementComponent *
 UPlayerLocomotionComponent::ResolveCharacterMovement() const
 {
-	const ACharacter *CharacterOwner =
-		Cast<ACharacter>(GetOwner());
+	ACharacter *CharacterOwner =
+		ResolveCharacterOwner();
 
 	return CharacterOwner
 		? CharacterOwner->GetCharacterMovement()
@@ -82,12 +124,15 @@ void UPlayerLocomotionComponent::ApplyBaseMovementSettings()
 	Movement->AirControl =
 		LocomotionSettings.AirControl;
 
+	Movement->GetNavAgentPropertiesRef().bCanCrouch = true;
+
 	RefreshLocomotionState();
 }
 
 bool UPlayerLocomotionComponent::CanSprint() const
 {
 	return bSprintRequested &&
+		!bCrouchRequested &&
 		!bBlocking;
 }
 
@@ -101,19 +146,29 @@ void UPlayerLocomotionComponent::RefreshLocomotionState()
 		return;
 	}
 
-	bIsSprinting = CanSprint();
+	const bool bUseSprintSpeed =
+		CanSprint();
 
 	float ResolvedWalkSpeed =
-		bIsSprinting
+		bUseSprintSpeed
 			? LocomotionSettings.SprintSpeed
 			: LocomotionSettings.WalkSpeed;
 
+	float ResolvedCrouchSpeed =
+		LocomotionSettings.CrouchSpeed;
+
 	if (bBlocking)
 	{
-		ResolvedWalkSpeed *=
+		const float BlockingMultiplier =
 			LocomotionSettings.BlockingMovementSpeedMultiplier;
+
+		ResolvedWalkSpeed *= BlockingMultiplier;
+		ResolvedCrouchSpeed *= BlockingMultiplier;
 	}
 
 	Movement->MaxWalkSpeed =
 		FMath::Max(ResolvedWalkSpeed, 0.0f);
+
+	Movement->MaxWalkSpeedCrouched =
+		FMath::Max(ResolvedCrouchSpeed, 0.0f);
 }
