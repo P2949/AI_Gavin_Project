@@ -7,6 +7,9 @@
 
 AEnemyAIController::AEnemyAIController()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
+
 	StateTreeAIComponent =
 		CreateDefaultSubobject<UStateTreeAIComponent>(
 			TEXT("StateTreeAIComponent"));
@@ -54,6 +57,13 @@ AEnemyAIController::AEnemyAIController()
 	AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(
 		this,
 		&AEnemyAIController::HandleTargetPerceptionUpdated);
+}
+
+void AEnemyAIController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	RefreshLastKnownTargetLocationFromSight();
 }
 
 void AEnemyAIController::OnPossess(APawn *InPawn)
@@ -165,6 +175,30 @@ void AEnemyAIController::UpdateCurrentTargetPerceptionState()
 	bIsCurrentTargetPerceived =
 		AIPerceptionComponent->HasAnyCurrentStimulus(
 			*TargetActor);
+}
+
+void AEnemyAIController::RefreshLastKnownTargetLocationFromSight()
+{
+	AActor *TargetActor = CurrentTargetActor.Get();
+
+	if (!TargetActor ||
+		!AIPerceptionComponent ||
+		!SightConfig)
+	{
+		return;
+	}
+
+	if (!AIPerceptionComponent->HasActiveStimulus(
+			*TargetActor,
+			SightConfig->GetSenseID()))
+	{
+		return;
+	}
+
+	LastKnownTargetLocation =
+		TargetActor->GetActorLocation();
+
+	bHasLastKnownTargetLocation = true;
 }
 
 void AEnemyAIController::ResetTargetState()

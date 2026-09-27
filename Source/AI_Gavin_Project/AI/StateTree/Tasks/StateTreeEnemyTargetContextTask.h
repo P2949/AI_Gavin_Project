@@ -29,7 +29,7 @@ struct AI_GAVIN_PROJECT_API FStateTreeEnemyTargetContextTaskInstanceData
 	UPROPERTY(VisibleAnywhere, Category = Output)
 	bool bIsTargetCurrentlyPerceived = false;
 
-	// Last location at which the target was successfully sensed.
+	// Most recent known location of the target while actively seen.
 	UPROPERTY(VisibleAnywhere, Category = Output)
 	FVector LastKnownTargetLocation = FVector::ZeroVector;
 
