@@ -8,6 +8,7 @@
 
 class UCameraComponent;
 class UMeleeAttackComponent;
+class UPlayerLocomotionComponent;
 class USceneComponent;
 class UInputAction;
 struct FInputActionValue;
@@ -25,10 +26,20 @@ public:
 	virtual void ResetForRoom(
 		const FTransform &ResetTransform) override;
 
+	UFUNCTION(BlueprintPure, Category = "Player|Locomotion")
+	UPlayerLocomotionComponent *GetLocomotionComponent() const
+	{
+		return LocomotionComponent;
+	}
+
 protected:
 	// First-person camera.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+
+	// Owns player locomotion tuning and movement-speed policy.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UPlayerLocomotionComponent> LocomotionComponent;
 
 	// Reusable melee attack mechanics.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -50,6 +61,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> JumpAction;
 
+	// Hold-to-sprint input.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> SprintAction;
+
+	// Hold-to-crouch input.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> CrouchAction;
+
 	// Primary attack input.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> AttackAction;
@@ -57,14 +76,6 @@ protected:
 	// Hold-to-block input.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> BlockAction;
-
-	// Movement speed multiplier applied while blocking.
-	UPROPERTY(
-		EditDefaultsOnly,
-		BlueprintReadOnly,
-		Category = "Movement|Blocking",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float BlockingMovementSpeedMultiplier = 0.65f;
 
 	virtual void BeginPlay() override;
 
@@ -79,6 +90,13 @@ private:
 	void HandleDeath(AActor *DamageCauser);
 
 	void StartAttack();
+
+	void StartSprinting();
+	void StopSprinting();
+
+	void StartCrouching();
+	void StopCrouching();
+
 	void StartBlocking();
 	void StopBlocking();
 
@@ -91,5 +109,4 @@ private:
 	void HandleBlockingChanged(bool bIsBlocking);
 
 	bool bBlockInputHeld = false;
-	float WalkSpeedBeforeBlocking = 0.0f;
 };
