@@ -6,6 +6,7 @@
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -21,6 +22,28 @@ UMeleeAttackComponent::UMeleeAttackComponent()
 
 bool UMeleeAttackComponent::TryStartAttack()
 {
+    return TryStartAttackInternal(
+        nullptr,
+        false);
+}
+
+bool UMeleeAttackComponent::TryStartAttackAtTarget(
+    AActor *TargetActor)
+{
+    if (!IsValid(TargetActor))
+    {
+        return false;
+    }
+
+    return TryStartAttackInternal(
+        TargetActor,
+        true);
+}
+
+bool UMeleeAttackComponent::TryStartAttackInternal(
+    AActor *TargetActor,
+    bool bRestrictToTarget)
+{
     if (!CanAttack())
     {
         return false;
@@ -32,6 +55,9 @@ bool UMeleeAttackComponent::TryStartAttack()
     {
         return false;
     }
+
+    ActiveAttackTarget = TargetActor;
+    bRestrictToActiveAttackTarget = bRestrictToTarget;
 
     ActiveAttackSettings = DefaultAttackSettings;
 
@@ -72,6 +98,9 @@ bool UMeleeAttackComponent::CancelAttack()
         TimerManager.ClearTimer(WindupTimerHandle);
         TimerManager.ClearTimer(RecoveryTimerHandle);
     }
+
+    ActiveAttackTarget.Reset();
+    bRestrictToActiveAttackTarget = false;
 
     SetAttackState(EMeleeAttackState::Ready);
 
@@ -131,6 +160,9 @@ void UMeleeAttackComponent::HandleWindupComplete()
 
     if (!World)
     {
+        ActiveAttackTarget.Reset();
+        bRestrictToActiveAttackTarget = false;
+
         SetAttackState(EMeleeAttackState::Ready);
         return;
     }
@@ -197,6 +229,12 @@ void UMeleeAttackComponent::PerformAttack()
         return;
     }
 
+    if (bRestrictToActiveAttackTarget &&
+        HitActor != ActiveAttackTarget.Get())
+    {
+        return;
+    }
+
     AController *EventInstigator = Owner->GetInstigatorController();
 
     if (const APawn *OwnerPawn = Cast<APawn>(Owner))
@@ -216,10 +254,58 @@ void UMeleeAttackComponent::PerformAttack()
             Owner,
             ActiveAttackSettings.DamageTypeClass);
 
+    ApplyKnockback(
+        HitActor,
+        HitDirection);
+
     OnAttackHit.Broadcast(
         HitActor,
         HitResult,
         AppliedDamage);
+}
+
+void UMeleeAttackComponent::ApplyKnockback(
+    AActor *HitActor,
+    const FVector &HitDirection) const
+{
+    ACharacter *HitCharacter = Cast<ACharacter>(HitActor);
+
+    if (!HitCharacter)
+    {
+        return;
+    }
+
+    const float HorizontalVelocity =
+        FMath::Max(
+            ActiveAttackSettings.KnockbackHorizontalVelocity,
+            0.0f);
+
+    const float VerticalVelocity =
+        FMath::Max(
+            ActiveAttackSettings.KnockbackVerticalVelocity,
+            0.0f);
+
+    if (HorizontalVelocity <= 0.0f &&
+        VerticalVelocity <= 0.0f)
+    {
+        return;
+    }
+
+    const FVector HorizontalDirection =
+        FVector(
+            HitDirection.X,
+            HitDirection.Y,
+            0.0f)
+            .GetSafeNormal();
+
+    const FVector LaunchVelocity =
+        HorizontalDirection * HorizontalVelocity +
+        FVector::UpVector * VerticalVelocity;
+
+    HitCharacter->LaunchCharacter(
+        LaunchVelocity,
+        HorizontalVelocity > 0.0f,
+        VerticalVelocity > 0.0f);
 }
 
 void UMeleeAttackComponent::HandleRecoveryComplete()
@@ -228,6 +314,9 @@ void UMeleeAttackComponent::HandleRecoveryComplete()
     {
         return;
     }
+
+    ActiveAttackTarget.Reset();
+    bRestrictToActiveAttackTarget = false;
 
     SetAttackState(EMeleeAttackState::Ready);
 }

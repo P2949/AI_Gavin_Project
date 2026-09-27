@@ -33,8 +33,22 @@ class AI_GAVIN_PROJECT_API UMeleeAttackComponent : public UActorComponent
 public:
     UMeleeAttackComponent();
 
+    void SetDefaultAttackSettings(
+        const FMeleeAttackSettings &NewSettings)
+    {
+        DefaultAttackSettings = NewSettings;
+    }
+
+    const FMeleeAttackSettings &GetDefaultAttackSettings() const
+    {
+        return DefaultAttackSettings;
+    }
+
     UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
     bool TryStartAttack();
+
+    // Starts an attack that may only affect the specified actor.
+    bool TryStartAttackAtTarget(AActor *TargetActor);
 
     UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
     bool CancelAttack();
@@ -104,10 +118,22 @@ protected:
     TObjectPtr<USceneComponent> AttackOriginComponent;
 
 private:
+    bool TryStartAttackInternal(
+        AActor *TargetActor,
+        bool bRestrictToTarget);
+
     void SetAttackState(EMeleeAttackState NewState);
     void HandleWindupComplete();
     void PerformAttack();
+
+    void ApplyKnockback(
+        AActor *HitActor,
+        const FVector &HitDirection) const;
+
     void HandleRecoveryComplete();
+
+    TWeakObjectPtr<AActor> ActiveAttackTarget;
+    bool bRestrictToActiveAttackTarget = false;
 
     FTimerHandle WindupTimerHandle;
     FTimerHandle RecoveryTimerHandle;

@@ -43,6 +43,7 @@ public:
 	}
 
 protected:
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnPossess(APawn *InPawn) override;
 	virtual void OnUnPossess() override;
 
@@ -82,6 +83,7 @@ private:
 		FAIStimulus Stimulus);
 
 	void UpdateCurrentTargetPerceptionState();
+	void RefreshLastKnownTargetLocationFromSight();
 	void ResetTargetState();
 
 	UPROPERTY(
