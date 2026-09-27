@@ -22,7 +22,8 @@ EStateTreeRunStatus FStateTreeMeleeAttackTask::EnterState(
 	InstanceData.AttackComponent = nullptr;
 	InstanceData.bStartedAttack = false;
 
-	if (!IsValid(InstanceData.Actor))
+	if (!IsValid(InstanceData.Actor) ||
+		!IsValid(InstanceData.TargetActor))
 	{
 		return EStateTreeRunStatus::Failed;
 	}
@@ -37,7 +38,8 @@ EStateTreeRunStatus FStateTreeMeleeAttackTask::EnterState(
 
 	InstanceData.AttackComponent = AttackComponent;
 
-	if (!AttackComponent->TryStartAttack())
+	if (!AttackComponent->TryStartAttackAtTarget(
+			InstanceData.TargetActor))
 	{
 		return EStateTreeRunStatus::Failed;
 	}

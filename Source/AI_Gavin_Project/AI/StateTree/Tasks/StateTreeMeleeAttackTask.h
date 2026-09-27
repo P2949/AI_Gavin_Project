@@ -16,6 +16,10 @@ struct AI_GAVIN_PROJECT_API FStateTreeMeleeAttackTaskInstanceData
 	UPROPERTY(EditAnywhere, Category = Context)
 	TObjectPtr<AActor> Actor = nullptr;
 
+	// Actor this execution of the melee task intends to attack.
+	UPROPERTY(EditAnywhere, Category = Input)
+	TObjectPtr<AActor> TargetActor = nullptr;
+
 	// Component used by this execution of the task.
 	UPROPERTY(Transient)
 	TObjectPtr<UMeleeAttackComponent> AttackComponent = nullptr;

@@ -22,6 +22,28 @@ UMeleeAttackComponent::UMeleeAttackComponent()
 
 bool UMeleeAttackComponent::TryStartAttack()
 {
+    return TryStartAttackInternal(
+        nullptr,
+        false);
+}
+
+bool UMeleeAttackComponent::TryStartAttackAtTarget(
+    AActor *TargetActor)
+{
+    if (!IsValid(TargetActor))
+    {
+        return false;
+    }
+
+    return TryStartAttackInternal(
+        TargetActor,
+        true);
+}
+
+bool UMeleeAttackComponent::TryStartAttackInternal(
+    AActor *TargetActor,
+    bool bRestrictToTarget)
+{
     if (!CanAttack())
     {
         return false;
@@ -33,6 +55,9 @@ bool UMeleeAttackComponent::TryStartAttack()
     {
         return false;
     }
+
+    ActiveAttackTarget = TargetActor;
+    bRestrictToActiveAttackTarget = bRestrictToTarget;
 
     ActiveAttackSettings = DefaultAttackSettings;
 
@@ -73,6 +98,9 @@ bool UMeleeAttackComponent::CancelAttack()
         TimerManager.ClearTimer(WindupTimerHandle);
         TimerManager.ClearTimer(RecoveryTimerHandle);
     }
+
+    ActiveAttackTarget.Reset();
+    bRestrictToActiveAttackTarget = false;
 
     SetAttackState(EMeleeAttackState::Ready);
 
@@ -132,6 +160,9 @@ void UMeleeAttackComponent::HandleWindupComplete()
 
     if (!World)
     {
+        ActiveAttackTarget.Reset();
+        bRestrictToActiveAttackTarget = false;
+
         SetAttackState(EMeleeAttackState::Ready);
         return;
     }
@@ -194,6 +225,12 @@ void UMeleeAttackComponent::PerformAttack()
     AActor *HitActor = HitResult.GetActor();
 
     if (!HitActor)
+    {
+        return;
+    }
+
+    if (bRestrictToActiveAttackTarget &&
+        HitActor != ActiveAttackTarget.Get())
     {
         return;
     }
@@ -277,6 +314,9 @@ void UMeleeAttackComponent::HandleRecoveryComplete()
     {
         return;
     }
+
+    ActiveAttackTarget.Reset();
+    bRestrictToActiveAttackTarget = false;
 
     SetAttackState(EMeleeAttackState::Ready);
 }
