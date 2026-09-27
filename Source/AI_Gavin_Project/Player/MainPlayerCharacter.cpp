@@ -14,6 +14,7 @@
 #include "Combat/Health/HealthComponent.h"
 #include "Components/SceneComponent.h"
 #include "GameFramework/Controller.h"
+#include "Player/Locomotion/PlayerLocomotionComponent.h"
 
 // Sets default values
 AMainPlayerCharacter::AMainPlayerCharacter()
@@ -28,10 +29,10 @@ AMainPlayerCharacter::AMainPlayerCharacter()
 	// Do not automatically rotate toward movement direction.
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 
-	// Basic movement defaults.
-	GetCharacterMovement()->MaxWalkSpeed = 500.0f;
-	GetCharacterMovement()->JumpZVelocity = 500.0f;
-	GetCharacterMovement()->AirControl = 0.35f;
+	// Player locomotion policy owns movement tuning and speed resolution.
+	LocomotionComponent =
+		CreateDefaultSubobject<UPlayerLocomotionComponent>(
+			TEXT("LocomotionComponent"));
 
 	// First-person camera.
 	FirstPersonCamera =
@@ -74,6 +75,12 @@ void AMainPlayerCharacter::BeginPlay()
 		Defense->OnBlockingChanged.AddDynamic(
 			this,
 			&AMainPlayerCharacter::HandleBlockingChanged);
+
+		if (LocomotionComponent)
+		{
+			LocomotionComponent->SetBlockingState(
+				Defense->IsBlocking());
+		}
 	}
 
 	if (MeleeAttackComponent)
@@ -366,27 +373,9 @@ void AMainPlayerCharacter::HandleAttackStateChanged(
 
 void AMainPlayerCharacter::HandleBlockingChanged(bool bIsBlocking)
 {
-	UCharacterMovementComponent *Movement =
-		GetCharacterMovement();
-
-	if (!Movement)
+	if (LocomotionComponent)
 	{
-		return;
-	}
-
-	if (bIsBlocking)
-	{
-		WalkSpeedBeforeBlocking = Movement->MaxWalkSpeed;
-
-		Movement->MaxWalkSpeed =
-			WalkSpeedBeforeBlocking * BlockingMovementSpeedMultiplier;
-
-		return;
-	}
-
-	if (WalkSpeedBeforeBlocking > 0.0f)
-	{
-		Movement->MaxWalkSpeed = WalkSpeedBeforeBlocking;
-		WalkSpeedBeforeBlocking = 0.0f;
+		LocomotionComponent->SetBlockingState(
+			bIsBlocking);
 	}
 }
