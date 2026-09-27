@@ -68,14 +68,16 @@ protected:
         const EEndPlayReason::Type EndPlayReason) override;
 
     /**
-     * Convenience for the current single-room first playable.
+     * Optional convenience for deliberately configured single-room
+     * or test setups.
      *
-     * Future room entry logic can call ActivateRoom explicitly instead.
+     * Multi-room gameplay should activate the appropriate room
+     * explicitly when the player enters it.
      */
     UPROPERTY(
         EditInstanceOnly,
         Category = "Room|Lifecycle")
-    bool bAutoActivateOnBeginPlay = true;
+    bool bAutoActivateOnBeginPlay = false;
 
     /**
      * Optional authored location to which the active player resets.
