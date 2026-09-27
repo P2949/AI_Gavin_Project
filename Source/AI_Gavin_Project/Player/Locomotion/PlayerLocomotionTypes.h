@@ -7,8 +7,8 @@
  * Baseline tuning for the main player's locomotion.
  *
  * These values describe locomotion itself rather than input or combat.
- * Additional locomotion states can extend this structure when they
- * become real gameplay requirements.
+ * Additional locomotion tuning can extend this structure when it
+ * becomes a real gameplay requirement.
  */
 USTRUCT(BlueprintType)
 struct AI_GAVIN_PROJECT_API FPlayerLocomotionSettings
@@ -21,6 +21,13 @@ struct AI_GAVIN_PROJECT_API FPlayerLocomotionSettings
 		Category = "Locomotion",
 		meta = (ClampMin = "0.0", Units = "cm/s"))
 	float WalkSpeed = 500.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Locomotion",
+		meta = (ClampMin = "0.0", Units = "cm/s"))
+	float SprintSpeed = 750.0f;
 
 	UPROPERTY(
 		EditAnywhere,

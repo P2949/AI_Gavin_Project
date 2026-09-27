@@ -61,6 +61,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> JumpAction;
 
+	// Hold-to-sprint input.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> SprintAction;
+
 	// Primary attack input.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> AttackAction;
@@ -82,6 +86,10 @@ private:
 	void HandleDeath(AActor *DamageCauser);
 
 	void StartAttack();
+
+	void StartSprinting();
+	void StopSprinting();
+
 	void StartBlocking();
 	void StopBlocking();
 

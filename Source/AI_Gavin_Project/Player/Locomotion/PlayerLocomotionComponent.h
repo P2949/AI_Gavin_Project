@@ -26,6 +26,34 @@ public:
 	UPlayerLocomotionComponent();
 
 	/**
+	 * Records whether sprint is currently requested by the player.
+	 *
+	 * A request may remain active while another state, such as blocking,
+	 * temporarily prevents sprinting.
+	 */
+	void SetSprintRequested(bool bRequested);
+
+	/**
+	 * Clears player-owned transient locomotion intent.
+	 *
+	 * Used by lifecycle transitions such as death and room reset so
+	 * held input state cannot leak into a restored player.
+	 */
+	void ResetTransientState();
+
+	UFUNCTION(BlueprintPure, Category = "Player|Locomotion")
+	bool IsSprintRequested() const
+	{
+		return bSprintRequested;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Player|Locomotion")
+	bool IsSprinting() const
+	{
+		return bIsSprinting;
+	}
+
+	/**
 	 * Updates the movement consequence of the player's combat blocking
 	 * state.
 	 *
@@ -52,7 +80,11 @@ private:
 	UCharacterMovementComponent *ResolveCharacterMovement() const;
 
 	void ApplyBaseMovementSettings();
-	void RefreshMovementSpeed();
+	void RefreshLocomotionState();
 
+	bool CanSprint() const;
+
+	bool bSprintRequested = false;
+	bool bIsSprinting = false;
 	bool bBlocking = false;
 };

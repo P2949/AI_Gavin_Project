@@ -16,6 +16,24 @@ void UPlayerLocomotionComponent::BeginPlay()
 	ApplyBaseMovementSettings();
 }
 
+void UPlayerLocomotionComponent::SetSprintRequested(
+	bool bRequested)
+{
+	if (bSprintRequested == bRequested)
+	{
+		return;
+	}
+
+	bSprintRequested = bRequested;
+
+	RefreshLocomotionState();
+}
+
+void UPlayerLocomotionComponent::ResetTransientState()
+{
+	SetSprintRequested(false);
+}
+
 void UPlayerLocomotionComponent::SetBlockingState(
 	bool bNewBlocking)
 {
@@ -26,7 +44,7 @@ void UPlayerLocomotionComponent::SetBlockingState(
 
 	bBlocking = bNewBlocking;
 
-	RefreshMovementSpeed();
+	RefreshLocomotionState();
 }
 
 UCharacterMovementComponent *
@@ -64,10 +82,16 @@ void UPlayerLocomotionComponent::ApplyBaseMovementSettings()
 	Movement->AirControl =
 		LocomotionSettings.AirControl;
 
-	RefreshMovementSpeed();
+	RefreshLocomotionState();
 }
 
-void UPlayerLocomotionComponent::RefreshMovementSpeed()
+bool UPlayerLocomotionComponent::CanSprint() const
+{
+	return bSprintRequested &&
+		!bBlocking;
+}
+
+void UPlayerLocomotionComponent::RefreshLocomotionState()
 {
 	UCharacterMovementComponent *Movement =
 		ResolveCharacterMovement();
@@ -77,8 +101,12 @@ void UPlayerLocomotionComponent::RefreshMovementSpeed()
 		return;
 	}
 
+	bIsSprinting = CanSprint();
+
 	float ResolvedWalkSpeed =
-		LocomotionSettings.WalkSpeed;
+		bIsSprinting
+			? LocomotionSettings.SprintSpeed
+			: LocomotionSettings.WalkSpeed;
 
 	if (bBlocking)
 	{

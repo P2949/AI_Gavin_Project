@@ -94,8 +94,13 @@ void AMainPlayerCharacter::BeginPlay()
 void AMainPlayerCharacter::ResetForRoom(
 	const FTransform &ResetTransform)
 {
-	// Clear held input first so cancelling an attack cannot cause
-	// HandleAttackStateChanged to restore blocking.
+	if (LocomotionComponent)
+	{
+		LocomotionComponent->ResetTransientState();
+	}
+
+	// Clear held block input before cancelling an attack so returning
+	// to Ready cannot cause HandleAttackStateChanged to restore blocking.
 	bBlockInputHeld = false;
 
 	if (MeleeAttackComponent)
@@ -196,6 +201,27 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 			&ACharacter::StopJumping);
 	}
 
+	if (SprintAction)
+	{
+		EnhancedInputComponent->BindAction(
+			SprintAction,
+			ETriggerEvent::Started,
+			this,
+			&AMainPlayerCharacter::StartSprinting);
+
+		EnhancedInputComponent->BindAction(
+			SprintAction,
+			ETriggerEvent::Completed,
+			this,
+			&AMainPlayerCharacter::StopSprinting);
+
+		EnhancedInputComponent->BindAction(
+			SprintAction,
+			ETriggerEvent::Canceled,
+			this,
+			&AMainPlayerCharacter::StopSprinting);
+	}
+
 	if (AttackAction)
 	{
 		EnhancedInputComponent->BindAction(
@@ -271,8 +297,13 @@ void AMainPlayerCharacter::HandleDeath(
 {
 	static_cast<void>(DamageCauser);
 
-	// Clear this before cancelling the attack so returning to Ready
-	// cannot re-enable blocking through HandleAttackStateChanged.
+	if (LocomotionComponent)
+	{
+		LocomotionComponent->ResetTransientState();
+	}
+
+	// Clear held block input before cancelling the attack so returning
+	// to Ready cannot re-enable blocking through HandleAttackStateChanged.
 	bBlockInputHeld = false;
 
 	if (MeleeAttackComponent)
@@ -309,6 +340,28 @@ void AMainPlayerCharacter::StartAttack()
 	}
 
 	MeleeAttackComponent->TryStartAttack();
+}
+
+void AMainPlayerCharacter::StartSprinting()
+{
+	const UHealthComponent *Health =
+		GetHealthComponent();
+
+	if ((Health && Health->IsDead()) ||
+		!LocomotionComponent)
+	{
+		return;
+	}
+
+	LocomotionComponent->SetSprintRequested(true);
+}
+
+void AMainPlayerCharacter::StopSprinting()
+{
+	if (LocomotionComponent)
+	{
+		LocomotionComponent->SetSprintRequested(false);
+	}
 }
 
 void AMainPlayerCharacter::StartBlocking()
