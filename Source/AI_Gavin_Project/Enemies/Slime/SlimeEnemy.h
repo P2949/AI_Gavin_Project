@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Combat/Characters/CombatantCharacter.h"
+#include "World/Rooms/RoomResettable.h"
 #include "SlimeEnemy.generated.h"
 
 class AActor;
@@ -10,12 +11,16 @@ class USceneComponent;
 
 UCLASS()
 class AI_GAVIN_PROJECT_API ASlimeEnemy
-	: public ACombatantCharacter
+	: public ACombatantCharacter,
+	  public IRoomResettable
 {
 	GENERATED_BODY()
 
 public:
 	ASlimeEnemy();
+
+	virtual void ResetForRoom(
+		const FTransform &ResetTransform) override;
 
 protected:
 	virtual void BeginPlay() override;
@@ -37,4 +42,6 @@ protected:
 private:
 	UFUNCTION()
 	void HandleDeath(AActor *DamageCauser);
+
+	void ShutdownControllerForRoomReset();
 };
