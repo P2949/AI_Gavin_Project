@@ -76,6 +76,45 @@ void ASlimeEnemy::BeginPlay()
 	}
 }
 
+void ASlimeEnemy::ResetForRoom(
+	const FTransform &ResetTransform)
+{
+	if (MeleeAttackComponent)
+	{
+		MeleeAttackComponent->CancelAttack();
+	}
+
+	ShutdownControllerForRoomReset();
+
+	UCharacterMovementComponent *Movement =
+		GetCharacterMovement();
+
+	if (Movement)
+	{
+		Movement->StopMovementImmediately();
+		Movement->ClearAccumulatedForces();
+	}
+
+	SetActorTransform(
+		ResetTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+
+	if (Movement)
+	{
+		Movement->SetMovementMode(MOVE_Walking);
+		Movement->StopMovementImmediately();
+	}
+
+	if (UHealthComponent *Health = GetHealthComponent())
+	{
+		Health->ResetHealth();
+	}
+
+	SpawnDefaultController();
+}
+
 void ASlimeEnemy::HandleDeath(AActor *DamageCauser)
 {
 	static_cast<void>(DamageCauser);
@@ -89,11 +128,28 @@ void ASlimeEnemy::HandleDeath(AActor *DamageCauser)
 			GetCharacterMovement())
 	{
 		Movement->StopMovementImmediately();
+		Movement->ClearAccumulatedForces();
 		Movement->DisableMovement();
 	}
 
-	if (AController *OwningController = GetController())
+	ShutdownControllerForRoomReset();
+}
+
+void ASlimeEnemy::ShutdownControllerForRoomReset()
+{
+	AController *OwningController =
+		GetController();
+
+	if (!IsValid(OwningController))
 	{
-		OwningController->UnPossess();
+		return;
 	}
+
+	// Unpossessing gives the AI controller a clean shutdown boundary:
+	// its StateTree stops and perception/target state is cleared.
+	OwningController->UnPossess();
+
+	// The dead/reset slime must not leave a detached controller actor
+	// behind in the world.
+	OwningController->Destroy();
 }

@@ -11,7 +11,9 @@
 
 #include "Combat/Attack/MeleeAttackComponent.h"
 #include "Combat/Defense/DefenseComponent.h"
+#include "Combat/Health/HealthComponent.h"
 #include "Components/SceneComponent.h"
+#include "GameFramework/Controller.h"
 
 // Sets default values
 AMainPlayerCharacter::AMainPlayerCharacter()
@@ -60,6 +62,13 @@ void AMainPlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	if (UHealthComponent *Health = GetHealthComponent())
+	{
+		Health->OnDeath.AddDynamic(
+			this,
+			&AMainPlayerCharacter::HandleDeath);
+	}
+
 	if (UDefenseComponent *Defense = GetDefenseComponent())
 	{
 		Defense->OnBlockingChanged.AddDynamic(
@@ -72,6 +81,59 @@ void AMainPlayerCharacter::BeginPlay()
 		MeleeAttackComponent->OnAttackStateChanged.AddDynamic(
 			this,
 			&AMainPlayerCharacter::HandleAttackStateChanged);
+	}
+}
+
+void AMainPlayerCharacter::ResetForRoom(
+	const FTransform &ResetTransform)
+{
+	// Clear held input first so cancelling an attack cannot cause
+	// HandleAttackStateChanged to restore blocking.
+	bBlockInputHeld = false;
+
+	if (MeleeAttackComponent)
+	{
+		MeleeAttackComponent->CancelAttack();
+	}
+
+	if (UDefenseComponent *Defense = GetDefenseComponent())
+	{
+		Defense->SetBlocking(false);
+	}
+
+	StopJumping();
+	ConsumeMovementInputVector();
+
+	UCharacterMovementComponent *Movement =
+		GetCharacterMovement();
+
+	if (Movement)
+	{
+		Movement->StopMovementImmediately();
+		Movement->ClearAccumulatedForces();
+	}
+
+	SetActorTransform(
+		ResetTransform,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+
+	if (Controller)
+	{
+		Controller->SetControlRotation(
+			ResetTransform.Rotator());
+	}
+
+	if (Movement)
+	{
+		Movement->SetMovementMode(MOVE_Walking);
+		Movement->StopMovementImmediately();
+	}
+
+	if (UHealthComponent *Health = GetHealthComponent())
+	{
+		Health->ResetHealth();
 	}
 }
 
@@ -197,16 +259,61 @@ void AMainPlayerCharacter::Look(const FInputActionValue &Value)
 	AddControllerPitchInput(LookInput.Y);
 }
 
-void AMainPlayerCharacter::StartAttack()
+void AMainPlayerCharacter::HandleDeath(
+	AActor *DamageCauser)
 {
+	static_cast<void>(DamageCauser);
+
+	// Clear this before cancelling the attack so returning to Ready
+	// cannot re-enable blocking through HandleAttackStateChanged.
+	bBlockInputHeld = false;
+
 	if (MeleeAttackComponent)
 	{
-		MeleeAttackComponent->TryStartAttack();
+		MeleeAttackComponent->CancelAttack();
 	}
+
+	if (UDefenseComponent *Defense = GetDefenseComponent())
+	{
+		Defense->SetBlocking(false);
+	}
+
+	StopJumping();
+	ConsumeMovementInputVector();
+
+	if (UCharacterMovementComponent *Movement =
+			GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+		Movement->ClearAccumulatedForces();
+		Movement->DisableMovement();
+	}
+}
+
+void AMainPlayerCharacter::StartAttack()
+{
+	const UHealthComponent *Health =
+		GetHealthComponent();
+
+	if ((Health && Health->IsDead()) ||
+		!MeleeAttackComponent)
+	{
+		return;
+	}
+
+	MeleeAttackComponent->TryStartAttack();
 }
 
 void AMainPlayerCharacter::StartBlocking()
 {
+	const UHealthComponent *Health =
+		GetHealthComponent();
+
+	if (Health && Health->IsDead())
+	{
+		return;
+	}
+
 	bBlockInputHeld = true;
 
 	if (MeleeAttackComponent &&

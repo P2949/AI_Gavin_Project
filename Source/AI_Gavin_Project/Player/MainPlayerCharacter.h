@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Combat/Characters/CombatantCharacter.h"
 #include "Combat/Attack/MeleeAttackTypes.h"
+#include "World/Rooms/RoomResettable.h"
 #include "MainPlayerCharacter.generated.h"
 
 class UCameraComponent;
@@ -12,12 +13,17 @@ class UInputAction;
 struct FInputActionValue;
 
 UCLASS()
-class AI_GAVIN_PROJECT_API AMainPlayerCharacter : public ACombatantCharacter
+class AI_GAVIN_PROJECT_API AMainPlayerCharacter
+	: public ACombatantCharacter,
+	  public IRoomResettable
 {
 	GENERATED_BODY()
 
 public:
 	AMainPlayerCharacter();
+
+	virtual void ResetForRoom(
+		const FTransform &ResetTransform) override;
 
 protected:
 	// First-person camera.
@@ -68,6 +74,9 @@ protected:
 private:
 	void Move(const FInputActionValue &Value);
 	void Look(const FInputActionValue &Value);
+
+	UFUNCTION()
+	void HandleDeath(AActor *DamageCauser);
 
 	void StartAttack();
 	void StartBlocking();
