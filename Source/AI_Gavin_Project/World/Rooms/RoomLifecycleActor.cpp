@@ -137,8 +137,9 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
 
 void ARoomLifecycleActor::DeactivateRoom()
 {
-    ClearActivePlayerTracking();
     bResetPending = false;
+    bCompletionPending = false;
+    ClearActivePlayerTracking();
 
     if (IsRoomActive())
     {
@@ -148,16 +149,88 @@ void ARoomLifecycleActor::DeactivateRoom()
 
 bool ARoomLifecycleActor::CompleteRoom()
 {
-    if (!IsRoomActive())
+    if (!IsRoomActive() ||
+        bResetPending)
     {
         return false;
     }
 
-    bResetPending = false;
-    ClearActivePlayerTracking();
-    SetRoomState(ERoomLifecycleState::Completed);
+    UHealthComponent *PlayerHealth =
+        ActivePlayerHealthComponent.Get();
+
+    if (!IsValid(PlayerHealth))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT(
+                "RoomLifecycleActor '%s' cannot complete because "
+                "its active player HealthComponent is invalid."),
+            *GetName());
+
+        return false;
+    }
+
+    if (PlayerHealth->IsDead())
+    {
+        RequestRoomReset();
+        return false;
+    }
+
+    if (bCompletionPending)
+    {
+        return true;
+    }
+
+    bCompletionPending = true;
+
+    GetWorldTimerManager().SetTimerForNextTick(
+        FTimerDelegate::CreateUObject(
+            this,
+            &ARoomLifecycleActor::PerformRoomCompletion));
 
     return true;
+}
+
+void ARoomLifecycleActor::PerformRoomCompletion()
+{
+    if (!bCompletionPending)
+    {
+        return;
+    }
+
+    bCompletionPending = false;
+
+    if (!IsRoomActive() ||
+        bResetPending)
+    {
+        return;
+    }
+
+    UHealthComponent *PlayerHealth =
+        ActivePlayerHealthComponent.Get();
+
+    if (!IsValid(PlayerHealth))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT(
+                "RoomLifecycleActor '%s' lost its active player "
+                "HealthComponent before room completion."),
+            *GetName());
+
+        return;
+    }
+
+    if (PlayerHealth->IsDead())
+    {
+        RequestRoomReset();
+        return;
+    }
+
+    ClearActivePlayerTracking();
+    SetRoomState(ERoomLifecycleState::Completed);
 }
 
 void ARoomLifecycleActor::ClearActivePlayerTracking()
@@ -257,8 +330,16 @@ bool ARoomLifecycleActor::UnregisterResetParticipant(
 
 void ARoomLifecycleActor::RequestRoomReset()
 {
-    if (!IsRoomActive() ||
-        bResetPending)
+    if (!IsRoomActive())
+    {
+        return;
+    }
+
+    // Player death has priority over an unresolved room-completion
+    // request. A queued completion callback becomes a harmless no-op.
+    bCompletionPending = false;
+
+    if (bResetPending)
     {
         return;
     }
@@ -300,6 +381,7 @@ void ARoomLifecycleActor::PerformRoomReset()
     }
 
     bResetPending = false;
+    bCompletionPending = false;
 
     if (!IsRoomActive())
     {

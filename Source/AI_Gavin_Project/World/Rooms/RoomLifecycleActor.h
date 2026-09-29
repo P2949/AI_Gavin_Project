@@ -65,9 +65,15 @@ public:
     void RequestRoomReset();
 
     /**
-     * Permanently completes this room instance.
+     * Requests permanent completion of this room instance.
      *
-     * Completion is accepted only while the room is Active.
+     * Completion is accepted only while the room is Active and no
+     * player-death reset takes precedence.
+     *
+     * Accepted completion is finalized on the next game tick so
+     * same-frame player death deterministically wins over completion.
+     *
+     * Repeated completion requests before finalization are harmless.
      * The reason for completion belongs to the caller.
      */
     UFUNCTION(BlueprintCallable, Category = "Room|Lifecycle")
@@ -148,6 +154,7 @@ private:
 
     void RegisterInitialResetParticipants();
     void PerformRoomReset();
+    void PerformRoomCompletion();
     void ClearActivePlayerTracking();
     void SetRoomState(ERoomLifecycleState NewState);
 
@@ -166,4 +173,5 @@ private:
         ERoomLifecycleState::Inactive;
 
     bool bResetPending = false;
+    bool bCompletionPending = false;
 };
