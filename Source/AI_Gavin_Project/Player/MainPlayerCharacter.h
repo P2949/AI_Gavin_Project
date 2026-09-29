@@ -88,6 +88,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> BlockAction;
 
+	// Contextual interaction input.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> InteractAction;
+
 	virtual void BeginPlay() override;
 
 	virtual void SetupPlayerInputComponent(
@@ -101,6 +105,7 @@ private:
 	void HandleDeath(AActor *DamageCauser);
 
 	void StartAttack();
+	void StartInteraction();
 
 	void StartSprinting();
 	void StopSprinting();

@@ -281,6 +281,15 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 			this,
 			&AMainPlayerCharacter::StopBlocking);
 	}
+
+	if (InteractAction)
+	{
+		EnhancedInputComponent->BindAction(
+			InteractAction,
+			ETriggerEvent::Started,
+			this,
+			&AMainPlayerCharacter::StartInteraction);
+	}
 }
 
 void AMainPlayerCharacter::Move(const FInputActionValue &Value)
@@ -370,6 +379,20 @@ void AMainPlayerCharacter::StartAttack()
 	}
 
 	MeleeAttackComponent->TryStartAttack();
+}
+
+void AMainPlayerCharacter::StartInteraction()
+{
+	const UHealthComponent *Health =
+		GetHealthComponent();
+
+	if ((Health && Health->IsDead()) ||
+		!InteractionComponent)
+	{
+		return;
+	}
+
+	InteractionComponent->TryInteract();
 }
 
 void AMainPlayerCharacter::StartSprinting()
