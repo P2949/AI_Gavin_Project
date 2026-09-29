@@ -14,6 +14,7 @@
 #include "Combat/Health/HealthComponent.h"
 #include "Components/SceneComponent.h"
 #include "GameFramework/Controller.h"
+#include "Player/Interaction/PlayerInteractionComponent.h"
 #include "Player/Locomotion/PlayerLocomotionComponent.h"
 
 // Sets default values
@@ -44,6 +45,14 @@ AMainPlayerCharacter::AMainPlayerCharacter()
 		FVector(0.0f, 0.0f, BaseEyeHeight));
 
 	FirstPersonCamera->bUsePawnControlRotation = true;
+
+	// Player interactions originate from the first-person view.
+	InteractionComponent =
+		CreateDefaultSubobject<UPlayerInteractionComponent>(
+			TEXT("InteractionComponent"));
+
+	InteractionComponent->SetInteractionOriginComponent(
+		FirstPersonCamera);
 
 	// Player melee attacks originate from the first-person view.
 	MeleeAttackOrigin =
@@ -272,6 +281,15 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 			this,
 			&AMainPlayerCharacter::StopBlocking);
 	}
+
+	if (InteractAction)
+	{
+		EnhancedInputComponent->BindAction(
+			InteractAction,
+			ETriggerEvent::Started,
+			this,
+			&AMainPlayerCharacter::StartInteraction);
+	}
 }
 
 void AMainPlayerCharacter::Move(const FInputActionValue &Value)
@@ -361,6 +379,20 @@ void AMainPlayerCharacter::StartAttack()
 	}
 
 	MeleeAttackComponent->TryStartAttack();
+}
+
+void AMainPlayerCharacter::StartInteraction()
+{
+	const UHealthComponent *Health =
+		GetHealthComponent();
+
+	if ((Health && Health->IsDead()) ||
+		!InteractionComponent)
+	{
+		return;
+	}
+
+	InteractionComponent->TryInteract();
 }
 
 void AMainPlayerCharacter::StartSprinting()

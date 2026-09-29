@@ -8,6 +8,7 @@
 
 class UCameraComponent;
 class UMeleeAttackComponent;
+class UPlayerInteractionComponent;
 class UPlayerLocomotionComponent;
 class USceneComponent;
 class UInputAction;
@@ -32,6 +33,12 @@ public:
 		return LocomotionComponent;
 	}
 
+	UFUNCTION(BlueprintPure, Category = "Player|Interaction")
+	UPlayerInteractionComponent *GetInteractionComponent() const
+	{
+		return InteractionComponent;
+	}
+
 protected:
 	// First-person camera.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -44,6 +51,10 @@ protected:
 	// Reusable melee attack mechanics.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMeleeAttackComponent> MeleeAttackComponent;
+
+	// Owns player-side interaction target acquisition and dispatch.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UPlayerInteractionComponent> InteractionComponent;
 
 	// Defines where and in which direction player melee attacks originate.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -77,6 +88,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> BlockAction;
 
+	// Contextual interaction input.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> InteractAction;
+
 	virtual void BeginPlay() override;
 
 	virtual void SetupPlayerInputComponent(
@@ -90,6 +105,7 @@ private:
 	void HandleDeath(AActor *DamageCauser);
 
 	void StartAttack();
+	void StartInteraction();
 
 	void StartSprinting();
 	void StopSprinting();
