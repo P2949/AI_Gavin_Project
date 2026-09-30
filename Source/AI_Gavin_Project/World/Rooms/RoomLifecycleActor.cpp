@@ -90,7 +90,8 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
         return false;
     }
 
-    if (!Cast<IRoomResettable>(Player))
+    if (!Player->GetClass()->ImplementsInterface(
+            URoomResettable::StaticClass()))
     {
         UE_LOG(
             LogTemp,
@@ -272,7 +273,8 @@ bool ARoomLifecycleActor::RegisterResetParticipant(
         return false;
     }
 
-    if (!Cast<IRoomResettable>(Participant))
+    if (!Participant->GetClass()->ImplementsInterface(
+            URoomResettable::StaticClass()))
     {
         UE_LOG(
             LogTemp,
@@ -404,10 +406,11 @@ void ARoomLifecycleActor::PerformRoomReset()
         return;
     }
 
-    if (IRoomResettable *ResettablePlayer =
-            Cast<IRoomResettable>(Player))
+    if (Player->GetClass()->ImplementsInterface(
+            URoomResettable::StaticClass()))
     {
-        ResettablePlayer->ResetForRoom(
+        IRoomResettable::Execute_ResetForRoom(
+            Player,
             ActivePlayerResetTransform);
     }
 
@@ -422,10 +425,11 @@ void ARoomLifecycleActor::PerformRoomReset()
             continue;
         }
 
-        if (IRoomResettable *ResettableParticipant =
-                Cast<IRoomResettable>(Participant))
+        if (Participant->GetClass()->ImplementsInterface(
+                URoomResettable::StaticClass()))
         {
-            ResettableParticipant->ResetForRoom(
+            IRoomResettable::Execute_ResetForRoom(
+                Participant,
                 Entry.ResetTransform);
         }
     }
@@ -446,6 +450,6 @@ FTransform ARoomLifecycleActor::ResolvePlayerResetTransform(
     }
 
     return Player
-        ? Player->GetActorTransform()
-        : FTransform::Identity;
+               ? Player->GetActorTransform()
+               : FTransform::Identity;
 }

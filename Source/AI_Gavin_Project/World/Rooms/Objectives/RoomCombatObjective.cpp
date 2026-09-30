@@ -117,7 +117,8 @@ bool ARoomCombatObjective::InitializeObjective()
 
         SeenTargets.Add(Target);
 
-        if (!Cast<IRoomResettable>(Target))
+        if (!Target->GetClass()->ImplementsInterface(
+                URoomResettable::StaticClass()))
         {
             UE_LOG(
                 LogTemp,

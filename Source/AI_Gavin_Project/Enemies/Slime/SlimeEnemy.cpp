@@ -76,7 +76,7 @@ void ASlimeEnemy::BeginPlay()
 	}
 }
 
-void ASlimeEnemy::ResetForRoom(
+void ASlimeEnemy::ResetForRoom_Implementation(
 	const FTransform &ResetTransform)
 {
 	if (MeleeAttackComponent)

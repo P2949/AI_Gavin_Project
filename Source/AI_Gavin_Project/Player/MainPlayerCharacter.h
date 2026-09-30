@@ -24,7 +24,7 @@ class AI_GAVIN_PROJECT_API AMainPlayerCharacter
 public:
 	AMainPlayerCharacter();
 
-	virtual void ResetForRoom(
+	virtual void ResetForRoom_Implementation(
 		const FTransform &ResetTransform) override;
 
 	UFUNCTION(BlueprintPure, Category = "Player|Locomotion")
