@@ -304,6 +304,83 @@ Suggested prefixes are `feature/`, `fix/`, `chore/`, `docs/`, and `refactor/`.
 
 Keep each pull request focused on one coherent change. If Unreal binary assets are changed, mention the relevant assets in the pull request so they can be reviewed in the Editor when necessary.
 
+## Unreal Data Validation
+
+Shared gameplay classes should use native C++ `IsDataValid()` checks when
+authored configuration has structural requirements that can be verified
+before runtime.
+
+Data Validation complements runtime guards. It does not replace runtime
+validation or defensive checks.
+
+Use validation for structural authoring requirements such as:
+
+- required actor references;
+- required components or interfaces;
+- invalid or duplicate authored participants;
+- other configuration that cannot function correctly at runtime.
+
+Do not use Data Validation to enforce encounter tuning or experimentation
+choices such as:
+
+- enemy counts;
+- attack timings;
+- movement values;
+- perception ranges;
+- balance parameters;
+- other values that designers are expected to change frequently.
+
+Structural errors should normally be reported as validation errors.
+
+Suspicious but runtime-tolerable configuration, such as duplicate entries
+that the runtime safely ignores, may be reported as warnings.
+
+### Editor Validation
+
+Saving an asset normally runs applicable validation automatically.
+
+To validate an asset explicitly in Unreal Editor:
+
+1. select the asset in the Content Browser;
+2. right-click it;
+3. choose **Asset Actions**;
+4. choose **Validate Assets**.
+
+Validation diagnostics appear in the Message Log under **Asset Check**.
+
+### Project-Wide Validation
+
+The whole project can be validated from the command line with:
+
+```bash
+"/path/to/UnrealEditor-Cmd" \
+    "/path/to/AI_Gavin_Project.uproject" \
+    -run=DataValidation \
+    -unattended \
+    -nop4 \
+    -stdout \
+    -FullStdOutLogOutput
+```
+
+A clean validation baseline should end with:
+
+```text
+Success - 0 error(s), 0 warning(s)
+```
+
+and return exit code `0`.
+
+Warnings may still return exit code `0`; validation errors should cause the
+project-wide validation command to fail.
+
+When adding a new native validation rule, verify both:
+
+1. that deliberately invalid authored data produces the expected diagnostic;
+2. that valid authored data passes cleanly.
+
+Keep existing runtime guards even when an equivalent authoring-time
+validation rule exists.
+
 ## Before Committing
 
 Check the working tree:

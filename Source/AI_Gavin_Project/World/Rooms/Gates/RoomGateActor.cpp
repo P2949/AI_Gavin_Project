@@ -4,6 +4,10 @@
 #include "Components/StaticMeshComponent.h"
 #include "World/Rooms/RoomLifecycleActor.h"
 
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
+
 ARoomGateActor::ARoomGateActor()
 {
     PrimaryActorTick.bCanEverTick = false;
@@ -37,6 +41,35 @@ ARoomGateActor::ARoomGateActor()
     GateVisual->SetCollisionEnabled(
         ECollisionEnabled::NoCollision);
 }
+
+#if WITH_EDITOR
+EDataValidationResult ARoomGateActor::IsDataValid(
+    FDataValidationContext &Context) const
+{
+    EDataValidationResult Result =
+        CombineDataValidationResults(
+            Super::IsDataValid(Context),
+            EDataValidationResult::Valid);
+
+    if (!IsValid(RoomLifecycle))
+    {
+        Context.AddError(
+            FText::Format(
+                NSLOCTEXT(
+                    "RoomGateActor",
+                    "MissingRoomLifecycle",
+                    "Room gate '{0}' requires a valid "
+                    "RoomLifecycleActor."),
+                FText::FromString(GetName())));
+
+        Result = CombineDataValidationResults(
+            Result,
+            EDataValidationResult::Invalid);
+    }
+
+    return Result;
+}
+#endif
 
 void ARoomGateActor::BeginPlay()
 {

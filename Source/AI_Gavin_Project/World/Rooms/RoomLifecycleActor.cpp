@@ -5,10 +5,97 @@
 #include "TimerManager.h"
 #include "World/Rooms/RoomResettable.h"
 
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
+
 ARoomLifecycleActor::ARoomLifecycleActor()
 {
     PrimaryActorTick.bCanEverTick = false;
 }
+
+#if WITH_EDITOR
+EDataValidationResult ARoomLifecycleActor::IsDataValid(
+    FDataValidationContext &Context) const
+{
+    EDataValidationResult Result =
+        CombineDataValidationResults(
+            Super::IsDataValid(Context),
+            EDataValidationResult::Valid);
+
+    TSet<AActor *> SeenParticipants;
+
+    for (AActor *Participant : InitialResetParticipants)
+    {
+        if (!IsValid(Participant))
+        {
+            Context.AddWarning(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomLifecycleActor",
+                        "InvalidInitialResetParticipant",
+                        "Room lifecycle '{0}' contains an invalid "
+                        "initial reset participant."),
+                    FText::FromString(GetName())));
+            continue;
+        }
+
+        if (Participant == this)
+        {
+            Context.AddError(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomLifecycleActor",
+                        "SelfInitialResetParticipant",
+                        "Room lifecycle '{0}' cannot register itself "
+                        "as an initial reset participant."),
+                    FText::FromString(GetName())));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+            continue;
+        }
+
+        if (SeenParticipants.Contains(Participant))
+        {
+            Context.AddWarning(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomLifecycleActor",
+                        "DuplicateInitialResetParticipant",
+                        "Room lifecycle '{0}' contains duplicate "
+                        "initial reset participant '{1}'."),
+                    FText::FromString(GetName()),
+                    FText::FromString(Participant->GetName())));
+            continue;
+        }
+
+        SeenParticipants.Add(Participant);
+
+        if (!Participant->GetClass()->ImplementsInterface(
+                URoomResettable::StaticClass()))
+        {
+            Context.AddError(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomLifecycleActor",
+                        "ParticipantNotResettable",
+                        "Room lifecycle '{0}' cannot use initial "
+                        "reset participant '{1}' because it does not "
+                        "implement IRoomResettable."),
+                    FText::FromString(GetName()),
+                    FText::FromString(Participant->GetName())));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+    }
+
+    return Result;
+}
+#endif
 
 void ARoomLifecycleActor::BeginPlay()
 {
