@@ -1,5 +1,7 @@
 #include "Player/MainPlayerController.h"
 
+#include "AI_Gavin_Project.h"
+
 #include "Combat/Characters/CombatantCharacter.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -43,7 +45,7 @@ void AMainPlayerController::InitializeInputMappingContexts()
 	if (!LocalPlayer)
 	{
 		UE_LOG(
-			LogTemp,
+			LogAI_Gavin_Project,
 			Error,
 			TEXT("MainPlayerController could not find a LocalPlayer."));
 
@@ -57,7 +59,7 @@ void AMainPlayerController::InitializeInputMappingContexts()
 	if (!InputSubsystem)
 	{
 		UE_LOG(
-			LogTemp,
+			LogAI_Gavin_Project,
 			Error,
 			TEXT(
 				"MainPlayerController could not find the "
@@ -72,7 +74,7 @@ void AMainPlayerController::InitializeInputMappingContexts()
 		if (!MappingConfig.MappingContext)
 		{
 			UE_LOG(
-				LogTemp,
+				LogAI_Gavin_Project,
 				Warning,
 				TEXT(
 					"MainPlayerController has an invalid "
@@ -92,7 +94,7 @@ void AMainPlayerController::InitializePlayerHUD()
 	if (!PlayerHUDWidgetClass)
 	{
 		UE_LOG(
-			LogTemp,
+			LogAI_Gavin_Project,
 			Warning,
 			TEXT(
 				"MainPlayerController has no player HUD "
@@ -109,7 +111,7 @@ void AMainPlayerController::InitializePlayerHUD()
 	if (!PlayerHUDWidget)
 	{
 		UE_LOG(
-			LogTemp,
+			LogAI_Gavin_Project,
 			Error,
 			TEXT(
 				"MainPlayerController failed to create "

@@ -1,5 +1,7 @@
 #include "World/Rooms/RoomLifecycleActor.h"
 
+#include "AI_Gavin_Project.h"
+
 #include "Combat/Health/HealthComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -114,7 +116,7 @@ void ARoomLifecycleActor::BeginPlay()
     if (!Player)
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Warning,
             TEXT(
                 "RoomLifecycleActor '%s' could not auto-activate "
@@ -142,7 +144,7 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
     if (!IsValid(Player))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Warning,
             TEXT(
                 "RoomLifecycleActor '%s' cannot activate with "
@@ -165,7 +167,7 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
         }
 
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Warning,
             TEXT(
                 "RoomLifecycleActor '%s' is already active for "
@@ -181,7 +183,7 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
             URoomResettable::StaticClass()))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Warning,
             TEXT(
                 "RoomLifecycleActor '%s' cannot activate because "
@@ -198,7 +200,7 @@ bool ARoomLifecycleActor::ActivateRoom(APawn *Player)
     if (!PlayerHealth)
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Warning,
             TEXT(
                 "RoomLifecycleActor '%s' cannot activate because "
@@ -249,7 +251,7 @@ bool ARoomLifecycleActor::CompleteRoom()
     if (!IsValid(PlayerHealth))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Error,
             TEXT(
                 "RoomLifecycleActor '%s' cannot complete because "
@@ -301,7 +303,7 @@ void ARoomLifecycleActor::PerformRoomCompletion()
     if (!IsValid(PlayerHealth))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Error,
             TEXT(
                 "RoomLifecycleActor '%s' lost its active player "
@@ -364,7 +366,7 @@ bool ARoomLifecycleActor::RegisterResetParticipant(
             URoomResettable::StaticClass()))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Warning,
             TEXT(
                 "RoomLifecycleActor '%s' cannot register '%s' "
@@ -482,7 +484,7 @@ void ARoomLifecycleActor::PerformRoomReset()
     if (!IsValid(Player))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Warning,
             TEXT(
                 "RoomLifecycleActor '%s' lost its active player "

@@ -70,23 +70,60 @@ The original meeting and brainstorming notes are retained in:
 
 `docs/baseline.md`
 
-## Template and Reference Content
+## Current Project Baseline
 
-The existing `ThirdPerson`, `Variant_Combat`, `Variant_Platforming`, and `Variant_SideScrolling` content and corresponding variant C++ code come from Unreal Engine template and example content.
-
-They are currently retained as reference material and as a known-working baseline while the team decides the game's direction.
-
-In particular, some of the template variants contain working AI and StateTree examples that may be useful for understanding Unreal Engine systems. Their presence does not make them the architecture of this project.
-
-Do not place new project-owned gameplay, AI, Blueprint, StateTree, or level work inside the `ThirdPerson` or `Variant_*` directories merely because related example code already exists there.
-
-Project-owned Unreal content should instead live under:
+Project-owned gameplay and content live under:
 
 ```text
 /Game/AI_Gavin/
+Source/AI_Gavin_Project/
 ```
 
-The team will decide which template assets or code should eventually be retained, adapted, moved, or removed after the project direction has been agreed.
+The current project startup baseline is:
+
+```text
+Map:
+    /Game/AI_Gavin/World/Rooms/FirstPlayable/Maps/L_FirstPlayableRoom
+
+GameMode:
+    /Game/AI_Gavin/Player/Blueprints/BP_MainGameMode
+```
+
+`L_FirstPlayableRoom` is the current first-playable integration baseline. It
+brings together the project-owned first-person player, controller and HUD,
+combat, the slime enemy, room activation, room reset/completion, gates, and
+authoring validation.
+
+The first-playable room is a development baseline, not a commitment to the
+final world-composition architecture. The final game is expected to grow into
+multiple independently developed encounters connected through a shared world
+or hub structure.
+
+Shared gameplay capabilities should normally be implemented in reviewable C++
+once they have a genuine project-wide meaning or multiple real consumers have
+revealed a stable common contract. Encounter-specific presentation, authored
+AI data, level content, and other local experimentation may remain in
+encounter-owned Unreal assets where that keeps iteration cheap.
+
+## Template and Reference Content
+
+The existing `ThirdPerson`, `Variant_Combat`, `Variant_Platforming`, and
+`Variant_SideScrolling` content and corresponding variant C++ code originate
+from Unreal Engine template/example content.
+
+They are legacy reference material and are not part of the intended project
+architecture.
+
+Do not place new project-owned gameplay, AI, Blueprint, StateTree, or level
+work inside the `ThirdPerson` or `Variant_*` directories.
+
+Template and reference content will be removed only through a
+dependency-aware cleanup. Unreal assets must be inspected and moved or deleted
+through Unreal Editor, and configuration redirects or native dependencies
+must not be removed until surviving assets no longer depend on them.
+
+New project-owned work belongs under `/Game/AI_Gavin/` and the corresponding
+project-owned C++ source directories.
 
 ## Platform Status
 

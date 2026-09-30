@@ -1,5 +1,7 @@
 #include "Player/Locomotion/PlayerLocomotionComponent.h"
 
+#include "AI_Gavin_Project.h"
+
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
@@ -108,7 +110,7 @@ void UPlayerLocomotionComponent::ApplyBaseMovementSettings()
 	if (!Movement)
 	{
 		UE_LOG(
-			LogTemp,
+			LogAI_Gavin_Project,
 			Error,
 			TEXT(
 				"PlayerLocomotionComponent on '%s' requires "
