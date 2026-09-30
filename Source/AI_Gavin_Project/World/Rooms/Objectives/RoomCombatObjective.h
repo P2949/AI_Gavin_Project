@@ -6,6 +6,7 @@
 #include "RoomCombatObjective.generated.h"
 
 class ARoomLifecycleActor;
+class FDataValidationContext;
 class UHealthComponent;
 
 /**
@@ -24,6 +25,11 @@ class AI_GAVIN_PROJECT_API ARoomCombatObjective : public AActor
 
 public:
     ARoomCombatObjective();
+
+#if WITH_EDITOR
+    virtual EDataValidationResult IsDataValid(
+        FDataValidationContext &Context) const override;
+#endif
 
 protected:
     virtual void BeginPlay() override;

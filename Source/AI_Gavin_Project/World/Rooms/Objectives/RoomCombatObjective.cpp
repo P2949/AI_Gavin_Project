@@ -5,10 +5,134 @@
 #include "World/Rooms/RoomLifecycleActor.h"
 #include "World/Rooms/RoomResettable.h"
 
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
+
 ARoomCombatObjective::ARoomCombatObjective()
 {
     PrimaryActorTick.bCanEverTick = false;
 }
+
+#if WITH_EDITOR
+EDataValidationResult ARoomCombatObjective::IsDataValid(
+    FDataValidationContext &Context) const
+{
+    EDataValidationResult Result =
+        CombineDataValidationResults(
+            Super::IsDataValid(Context),
+            EDataValidationResult::Valid);
+
+    if (!IsValid(RoomLifecycle))
+    {
+        Context.AddError(
+            FText::Format(
+                NSLOCTEXT(
+                    "RoomCombatObjective",
+                    "MissingRoomLifecycle",
+                    "Room combat objective '{0}' requires a valid "
+                    "RoomLifecycleActor."),
+                FText::FromString(GetName())));
+
+        Result = CombineDataValidationResults(
+            Result,
+            EDataValidationResult::Invalid);
+    }
+
+    if (RequiredTargets.IsEmpty())
+    {
+        Context.AddError(
+            FText::Format(
+                NSLOCTEXT(
+                    "RoomCombatObjective",
+                    "MissingRequiredTargets",
+                    "Room combat objective '{0}' requires at least "
+                    "one combat target."),
+                FText::FromString(GetName())));
+
+        Result = CombineDataValidationResults(
+            Result,
+            EDataValidationResult::Invalid);
+    }
+
+    TSet<AActor *> SeenTargets;
+
+    for (AActor *Target : RequiredTargets)
+    {
+        if (!IsValid(Target))
+        {
+            Context.AddError(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomCombatObjective",
+                        "InvalidRequiredTarget",
+                        "Room combat objective '{0}' contains an "
+                        "invalid required target."),
+                    FText::FromString(GetName())));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+            continue;
+        }
+
+        if (SeenTargets.Contains(Target))
+        {
+            Context.AddWarning(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomCombatObjective",
+                        "DuplicateRequiredTarget",
+                        "Room combat objective '{0}' contains "
+                        "duplicate target '{1}'."),
+                    FText::FromString(GetName()),
+                    FText::FromString(Target->GetName())));
+            continue;
+        }
+
+        SeenTargets.Add(Target);
+
+        if (!Target->GetClass()->ImplementsInterface(
+                URoomResettable::StaticClass()))
+        {
+            Context.AddError(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomCombatObjective",
+                        "TargetNotResettable",
+                        "Room combat objective '{0}' cannot use "
+                        "target '{1}' because it does not implement "
+                        "IRoomResettable."),
+                    FText::FromString(GetName()),
+                    FText::FromString(Target->GetName())));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+
+        if (!Target->FindComponentByClass<UHealthComponent>())
+        {
+            Context.AddError(
+                FText::Format(
+                    NSLOCTEXT(
+                        "RoomCombatObjective",
+                        "TargetMissingHealthComponent",
+                        "Room combat objective '{0}' cannot use "
+                        "target '{1}' because it has no "
+                        "HealthComponent."),
+                    FText::FromString(GetName()),
+                    FText::FromString(Target->GetName())));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+    }
+
+    return Result;
+}
+#endif
 
 void ARoomCombatObjective::BeginPlay()
 {

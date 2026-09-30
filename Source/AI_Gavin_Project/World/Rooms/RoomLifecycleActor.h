@@ -6,6 +6,7 @@
 #include "RoomLifecycleActor.generated.h"
 
 class APawn;
+class FDataValidationContext;
 class UHealthComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
@@ -29,6 +30,11 @@ class AI_GAVIN_PROJECT_API ARoomLifecycleActor : public AActor
 
 public:
     ARoomLifecycleActor();
+
+#if WITH_EDITOR
+    virtual EDataValidationResult IsDataValid(
+        FDataValidationContext &Context) const override;
+#endif
 
     /**
      * Makes this room responsible for the supplied player.

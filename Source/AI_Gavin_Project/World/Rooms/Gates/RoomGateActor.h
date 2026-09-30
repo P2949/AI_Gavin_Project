@@ -6,6 +6,7 @@
 #include "RoomGateActor.generated.h"
 
 class ARoomLifecycleActor;
+class FDataValidationContext;
 class UBoxComponent;
 class UStaticMeshComponent;
 
@@ -25,6 +26,11 @@ class AI_GAVIN_PROJECT_API ARoomGateActor : public AActor
 
 public:
     ARoomGateActor();
+
+#if WITH_EDITOR
+    virtual EDataValidationResult IsDataValid(
+        FDataValidationContext &Context) const override;
+#endif
 
 protected:
     virtual void BeginPlay() override;

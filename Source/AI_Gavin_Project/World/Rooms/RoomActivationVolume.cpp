@@ -4,6 +4,10 @@
 #include "GameFramework/Pawn.h"
 #include "World/Rooms/RoomLifecycleActor.h"
 
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
+
 ARoomActivationVolume::ARoomActivationVolume()
 {
     PrimaryActorTick.bCanEverTick = false;
@@ -38,6 +42,35 @@ ARoomActivationVolume::ARoomActivationVolume()
         this,
         &ARoomActivationVolume::HandleActivationOverlap);
 }
+
+#if WITH_EDITOR
+EDataValidationResult ARoomActivationVolume::IsDataValid(
+    FDataValidationContext &Context) const
+{
+    EDataValidationResult Result =
+        CombineDataValidationResults(
+            Super::IsDataValid(Context),
+            EDataValidationResult::Valid);
+
+    if (!IsValid(RoomLifecycle))
+    {
+        Context.AddError(
+            FText::Format(
+                NSLOCTEXT(
+                    "RoomActivationVolume",
+                    "MissingRoomLifecycle",
+                    "Room activation volume '{0}' requires a valid "
+                    "RoomLifecycleActor."),
+                FText::FromString(GetName())));
+
+        Result = CombineDataValidationResults(
+            Result,
+            EDataValidationResult::Invalid);
+    }
+
+    return Result;
+}
+#endif
 
 void ARoomActivationVolume::BeginPlay()
 {

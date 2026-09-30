@@ -5,6 +5,7 @@
 #include "RoomActivationVolume.generated.h"
 
 class ARoomLifecycleActor;
+class FDataValidationContext;
 class UBoxComponent;
 class UPrimitiveComponent;
 struct FHitResult;
@@ -25,6 +26,11 @@ class AI_GAVIN_PROJECT_API ARoomActivationVolume : public AActor
 
 public:
     ARoomActivationVolume();
+
+#if WITH_EDITOR
+    virtual EDataValidationResult IsDataValid(
+        FDataValidationContext &Context) const override;
+#endif
 
 protected:
     virtual void BeginPlay() override;
