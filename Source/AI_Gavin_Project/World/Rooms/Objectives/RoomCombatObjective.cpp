@@ -1,5 +1,7 @@
 #include "World/Rooms/Objectives/RoomCombatObjective.h"
 
+#include "AI_Gavin_Project.h"
+
 #include "Combat/Health/HealthComponent.h"
 #include "TimerManager.h"
 #include "World/Rooms/RoomLifecycleActor.h"
@@ -179,7 +181,7 @@ bool ARoomCombatObjective::InitializeObjective()
     if (!IsValid(RoomLifecycle))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Error,
             TEXT(
                 "RoomCombatObjective '%s' requires a valid "
@@ -192,7 +194,7 @@ bool ARoomCombatObjective::InitializeObjective()
     if (RequiredTargets.IsEmpty())
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Error,
             TEXT(
                 "RoomCombatObjective '%s' requires at least one "
@@ -215,7 +217,7 @@ bool ARoomCombatObjective::InitializeObjective()
         if (!IsValid(Target))
         {
             UE_LOG(
-                LogTemp,
+                LogAI_Gavin_Project,
                 Error,
                 TEXT(
                     "RoomCombatObjective '%s' contains an invalid "
@@ -228,7 +230,7 @@ bool ARoomCombatObjective::InitializeObjective()
         if (SeenTargets.Contains(Target))
         {
             UE_LOG(
-                LogTemp,
+                LogAI_Gavin_Project,
                 Warning,
                 TEXT(
                     "RoomCombatObjective '%s' contains duplicate "
@@ -245,7 +247,7 @@ bool ARoomCombatObjective::InitializeObjective()
                 URoomResettable::StaticClass()))
         {
             UE_LOG(
-                LogTemp,
+                LogAI_Gavin_Project,
                 Error,
                 TEXT(
                     "RoomCombatObjective '%s' cannot use target "
@@ -263,7 +265,7 @@ bool ARoomCombatObjective::InitializeObjective()
         if (!Health)
         {
             UE_LOG(
-                LogTemp,
+                LogAI_Gavin_Project,
                 Error,
                 TEXT(
                     "RoomCombatObjective '%s' cannot use target "
@@ -281,7 +283,7 @@ bool ARoomCombatObjective::InitializeObjective()
     if (ValidatedTargets.IsEmpty())
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Error,
             TEXT(
                 "RoomCombatObjective '%s' has no unique valid "
@@ -296,7 +298,7 @@ bool ARoomCombatObjective::InitializeObjective()
         if (!RoomLifecycle->RegisterResetParticipant(Target))
         {
             UE_LOG(
-                LogTemp,
+                LogAI_Gavin_Project,
                 Error,
                 TEXT(
                     "RoomCombatObjective '%s' failed to register "
@@ -390,7 +392,7 @@ void ARoomCombatObjective::EvaluateCompletion()
         if (!IsValid(Health))
         {
             UE_LOG(
-                LogTemp,
+                LogAI_Gavin_Project,
                 Error,
                 TEXT(
                     "RoomCombatObjective '%s' lost a required "

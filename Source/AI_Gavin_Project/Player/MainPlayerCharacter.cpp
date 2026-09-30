@@ -2,6 +2,8 @@
 
 #include "Player/MainPlayerCharacter.h"
 
+#include "AI_Gavin_Project.h"
+
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -170,7 +172,7 @@ void AMainPlayerCharacter::SetupPlayerInputComponent(
 	if (!EnhancedInputComponent)
 	{
 		UE_LOG(
-			LogTemp,
+			LogAI_Gavin_Project,
 			Error,
 			TEXT("MainPlayerCharacter requires an EnhancedInputComponent."));
 

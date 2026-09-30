@@ -1,5 +1,7 @@
 #include "World/Rooms/Gates/RoomGateActor.h"
 
+#include "AI_Gavin_Project.h"
+
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "World/Rooms/RoomLifecycleActor.h"
@@ -78,7 +80,7 @@ void ARoomGateActor::BeginPlay()
     if (!IsValid(RoomLifecycle))
     {
         UE_LOG(
-            LogTemp,
+            LogAI_Gavin_Project,
             Error,
             TEXT(
                 "RoomGateActor '%s' requires a valid "

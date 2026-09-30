@@ -228,6 +228,156 @@ This is particularly important for shared AI systems such as:
 
 These choices affect everyone and should not become project architecture accidentally.
 
+## Encounter Ownership and Concurrency
+
+The game is expected to contain several independently developed main
+encounters. Structure encounter work so contributors can iterate in parallel
+without repeatedly modifying the same Unreal binary assets.
+
+### Encounter-Local Content
+
+Once real work begins on an encounter, its project-owned content should live
+under an encounter-specific root such as:
+
+```text
+/Game/AI_Gavin/Encounters/<EncounterName>/
+```
+
+Create only the subdirectories the encounter actually needs, for example:
+
+```text
+Maps/
+AI/
+Blueprints/
+UI/
+Art/
+```
+
+Do not create empty encounter directory trees merely to establish symmetry.
+
+Each main encounter should normally own its own map rather than having several
+contributors build unrelated encounters directly inside one shared `.umap`.
+
+Encounter-local binary assets should have a clear primary owner while they are
+being actively changed. Existing binary asset ownership rules still apply.
+
+### Encounter-Local C++
+
+If an encounter genuinely requires native behavior that is not yet shared,
+keep that implementation local to the encounter, for example:
+
+```text
+Source/AI_Gavin_Project/Encounters/<EncounterName>/
+```
+
+Do not move behavior into a shared framework merely because another encounter
+might theoretically need it later.
+
+Use this promotion rule:
+
+1. the first real consumer may keep the concept encounter-local;
+2. when a second real consumer needs similar behavior, compare the concrete
+   implementations;
+3. extract shared C++ only when a stable common contract has become clear.
+
+Shared capabilities that already have a genuine project-wide meaning should
+continue to live in the existing shared areas such as:
+
+```text
+AI/
+Combat/
+Enemies/
+Interaction/
+Player/
+World/
+```
+
+Prefer C++ for shared gameplay contracts and behavior because text source is
+easier to review, merge, refactor, and develop concurrently than shared
+Blueprint graphs.
+
+Blueprints remain appropriate for encounter-local composition,
+presentation, authored tuning, and experimentation when they do not become
+high-contention shared dependencies.
+
+### Avoid Premature Shared Frameworks
+
+The existence of multiple encounters is not, by itself, justification for
+creating:
+
+- a generic encounter manager;
+- a universal encounter base class;
+- a shared StateTree or Blackboard;
+- a generic enemy hierarchy;
+- a generic ability framework;
+- a global event bus;
+- a faction or squad framework.
+
+Build concrete encounter behavior first. Promote common architecture only
+after repeated real requirements make the shared contract clear.
+
+This keeps experimentation cheap and prevents one encounter's assumptions from
+becoming constraints on every other encounter.
+
+## Integration-Owned Assets
+
+Assets that connect otherwise independently owned encounters are
+high-contention integration assets.
+
+Examples may eventually include:
+
+```text
+hub or world maps
+transition maps
+shared integration levels
+global progression assets
+shared world-composition configuration
+```
+
+These assets should have one active owner at a time unless contributors are
+deliberately working together through an agreed shared-editing workflow.
+
+Do not make every encounter branch modify the integration map as part of
+normal encounter development.
+
+Once the first real encounter has a minimal playable shell, perform an early
+integration spike to prove how independently owned encounter maps connect to
+the shared world. That spike should determine the actual composition strategy
+before the team commits broadly to Level Streaming, Level Instances, World
+Partition, One File Per Actor, or another workflow.
+
+Do not enable project-wide World Partition or One File Per Actor solely as a
+hypothetical solution to future merge conflicts. Introduce those systems only
+if the real integration workflow demonstrates that they solve an actual
+problem.
+
+## Cross-Encounter State
+
+Encounter-local systems may own encounter-local state.
+
+State that must survive travel between encounters, affect multiple encounters,
+or represent overall game progression must have one explicit shared owner and
+a clear interface.
+
+Do not store cross-encounter progression ad hoc in:
+
+- arbitrary encounter actors;
+- Level Blueprints;
+- unrelated Blueprint singletons;
+- duplicated variables in several encounter assets;
+- direct references from one encounter map into another encounter map.
+
+The concrete persistence mechanism should be selected when world integration
+provides real requirements. Do not introduce a persistence framework before
+those requirements exist.
+
+Until then, encounters should expose completion and other shared outcomes
+through the smallest existing shared contract that represents the behavior,
+rather than directly knowing about other encounters.
+
+This rule keeps encounter implementation replaceable and allows the eventual
+world/session layer to evolve without rewriting encounter internals.
+
 ## Files That Belong in Source Control
 
 Examples of files that normally belong in the repository include:
