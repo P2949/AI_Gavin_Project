@@ -19,7 +19,7 @@ class AI_GAVIN_PROJECT_API ASlimeEnemy
 public:
 	ASlimeEnemy();
 
-	virtual void ResetForRoom(
+	virtual void ResetForRoom_Implementation(
 		const FTransform &ResetTransform) override;
 
 protected:

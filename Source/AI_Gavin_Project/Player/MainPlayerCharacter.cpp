@@ -100,7 +100,7 @@ void AMainPlayerCharacter::BeginPlay()
 	}
 }
 
-void AMainPlayerCharacter::ResetForRoom(
+void AMainPlayerCharacter::ResetForRoom_Implementation(
 	const FTransform &ResetTransform)
 {
 	if (LocomotionComponent)
