@@ -139,6 +139,8 @@ This is a complicated one, but the general idea we had was to have the player al
 
 the idea is more "room pressure" then "Anti-camping" it's not about moving, it's about staying in the same room and staying out of combat for too long, just trying to stop the abuse of the regen, and make the player move foward, and for that reason i also think it is best to keep the regen going during combat, maybe a 2-5 seconds stop if you get hit as a punish but not too long, we want the player to move on, not hide away. 
 
+One addition, this is supposed to be here as an idea to be used in some situations by any dev that wants to use it. it is not something to be running on every room at all times.
+
 - Encounters:
 
 The main idea here is to allow each person the decide how they will handle the encounter, the idea of "beating" an encounter is ambiguous on porpuse, so you might be able to talk it out with the npc that started the encounter, or circunvent in some other pacifist way, or maybe it is an encounter that you can only win by fighting. 
@@ -147,29 +149,39 @@ The main idea here is to allow each person the decide how they will handle the e
 
 ## Add info about your encounter here
 
-- Encounter 1 (Misha)
+- Encounter 1 (Misha) Medieval / Trap Area
 
-AI idea:
+TEMPORARY (Misha needs to go over this and refine it, this is what i understood from our conversations, i'm just leaving the information here to make everything easier)
 
-Unique mechanic:
+From my understanding Misha is making a medieval focused idea, a dark and quiet area, having enemies appear and attack you, an enemy that keeps appearing and luring you into traps, with progress focused on finding out where the traps are and learning how to navigate around them. this is supposed to be a hard dark souls style encounter.
 
-Player problem being tested:
+AI idea: stalker/lurer plus ambush enemies.
 
-- Encounter 2 (Caoimhe)
+Unique mechanic: Map, traps and enemies and a kind of interesting puzzle.
 
-AI idea:
+Player problem being tested: Can the player stop reacting impulsively, learn how the hostile environment works, and navigate it deliberately?
 
-Unique mechanic:
+- Encounter 2 (Caoimhe) Circus / Theatre
 
-Player problem being tested:
+TEMPORARY (Caoimhe needs to go over this and refine it, this is what i understood from our conversations, i'm just leaving the information here to make everything easier)
+
+From my understanding Caoimhe is making a big boss fight, with a narrative build up, and a more scenic vibe than a complicated combat one. this will be focused on the circus, italian, Russian/circus vibe, having very silly and odd looking aesthetic but still having one concise theme of being old style theater, where you will have a long boss fight with two clowns.
+
+AI idea: Two highly characterized boss actors, and they interact with eachother and that changes with the fight.
+
+Unique mechanic: Everything works as a circus/theatre with a progressing story/environment.
+
+Player problem being tested: Can the player read two interacting enemies and adapt as the fight/performance changes?
 
 - Encounter 3 (Pedro)
 
-AI idea:
+I am making a 'No Combat' encounter, having a observer character that follows you and watches everything you do for that section (interacting with objects, NPCs, environment, movement, etc) and analyzes what you do and decides on a certain "vibe" for you and presenting to you something unique for your "vibe".
 
-Unique mechanic:
+AI idea: The observer watches player behaviour, builds an interpretation from it, and presents something unique to the player based on that interpretation.
 
-Player problem being tested:
+Unique mechanic: No combat, interactive experience, 'someone is watching you' thing.
+
+Player problem being tested: What does the player naturally do when the game stops explicitly telling them what matters?
 
 ## First deliverable 
 
@@ -206,39 +218,40 @@ restart from the start of the room, keep it simple for now and later we can move
 
 FIRST PLAYABLE IS DONE WHEN:
 
+**Status: Complete.**
 
-[ ] Player spawns in first-person.
+[x] Player spawns in first-person.
 
-[ ] Player can walk/look/jump.
+[x] Player can walk/look/jump.
 
-[ ] Player has health.
+[x] Player has health.
 
-[ ] Health is represented by the HUD.
+[x] Health is represented by the HUD.
 
-[ ] Player can attack.
+[x] Player can attack.
 
-[ ] Attack can damage the slime.
+[x] Attack can damage the slime.
 
-[ ] Player can hold block.
+[x] Player can hold block.
 
-[ ] Blocking reduces incoming physical damage.
+[x] Blocking reduces incoming physical damage.
 
-[ ] Slime detects/acquires player.
+[x] Slime detects/acquires player.
 
-[ ] Slime intentionally starts an attack.
+[x] Slime intentionally starts an attack.
 
-[ ] Merely touching the slime causes no damage.
+[x] Merely touching the slime causes no damage.
 
-[ ] Slime attack damages and knocks back player.
+[x] Slime attack damages and knocks back player.
 
-[ ] Slime can die.
+[x] Slime can die.
 
-[ ] Player can die/reset.
+[x] Player can die/reset.
 
-[ ] Everything works in the greybox room in PIE.
+[x] Everything works in the greybox room in PIE.
 
-[ ] Player attack has a defined recovery period.
+[x] Player attack has a defined recovery period.
 
-[ ] Blocking slows the player and reduces physical damage.
+[x] Blocking slows the player and reduces physical damage.
 
-[ ] HUD displays the knight/crusader class icon.
+[x] HUD displays the knight/crusader class icon.
