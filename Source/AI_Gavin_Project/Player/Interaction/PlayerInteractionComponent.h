@@ -8,6 +8,13 @@
 
 class USceneComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FOnInteractionDispatchedSignature,
+    AActor *,
+    InteractionTarget,
+    AActor *,
+    Interactor);
+
 /**
  * Owns player-side interaction target acquisition and dispatch.
  *
@@ -40,6 +47,18 @@ public:
      * Returns true when an interaction request was dispatched.
      */
     bool TryInteract();
+
+    /**
+     * Broadcast when this component dispatches an interaction request to an
+     * interactable actor.
+     *
+     * This reports the player interaction action; it does not imply that the
+     * target accepted the interaction or changed state.
+     */
+    UPROPERTY(
+        BlueprintAssignable,
+        Category = "Interaction")
+    FOnInteractionDispatchedSignature OnInteractionDispatched;
 
 protected:
     /**

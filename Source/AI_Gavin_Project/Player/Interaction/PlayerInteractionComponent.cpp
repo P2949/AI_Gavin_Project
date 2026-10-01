@@ -28,9 +28,15 @@ bool UPlayerInteractionComponent::TryInteract()
         return false;
     }
 
+    AActor *Interactor = GetOwner();
+
+    OnInteractionDispatched.Broadcast(
+        InteractionTarget,
+        Interactor);
+
     IInteractable::Execute_Interact(
         InteractionTarget,
-        GetOwner());
+        Interactor);
 
     return true;
 }
