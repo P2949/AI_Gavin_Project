@@ -107,23 +107,19 @@ encounter-owned Unreal assets where that keeps iteration cheap.
 
 ## Template and Reference Content
 
-The existing `ThirdPerson`, `Variant_Combat`, `Variant_Platforming`, and
-`Variant_SideScrolling` content and corresponding variant C++ code originate
-from Unreal Engine template/example content.
+The original Unreal Third Person and Variant template/reference content has
+been removed after dependency auditing.
 
-They are legacy reference material and are not part of the intended project
-architecture.
+Project-owned gameplay and content should remain under:
 
-Do not place new project-owned gameplay, AI, Blueprint, StateTree, or level
-work inside the `ThirdPerson` or `Variant_*` directories.
+```text
+/Game/AI_Gavin/
+Source/AI_Gavin_Project/
+```
 
-Template and reference content will be removed only through a
-dependency-aware cleanup. Unreal assets must be inspected and moved or deleted
-through Unreal Editor, and configuration redirects or native dependencies
-must not be removed until surviving assets no longer depend on them.
-
-New project-owned work belongs under `/Game/AI_Gavin/` and the corresponding
-project-owned C++ source directories.
+Do not reintroduce Unreal template/example content as project architecture
+unless specific assets are deliberately imported for an identified project
+need.
 
 ## Platform Status
 
