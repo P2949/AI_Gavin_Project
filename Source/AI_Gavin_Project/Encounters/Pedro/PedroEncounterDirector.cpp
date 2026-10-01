@@ -162,12 +162,9 @@ void APedroEncounterDirector::BeginPlay()
         return;
     }
 
-    InteractionComponent
-        ->OnInteractionDispatched
-        .AddDynamic(
-            this,
-            &APedroEncounterDirector::
-                HandleInteractionDispatched);
+    InteractionComponent->OnInteractionDispatched.AddDynamic(
+        this,
+        &APedroEncounterDirector::HandleInteractionDispatched);
 }
 
 void APedroEncounterDirector::HandleInteractionDispatched(
@@ -282,12 +279,9 @@ void APedroEncounterDirector::EndPlay(
 {
     if (IsValid(InteractionComponent))
     {
-        InteractionComponent
-            ->OnInteractionDispatched
-            .RemoveDynamic(
-                this,
-                &APedroEncounterDirector::
-                    HandleInteractionDispatched);
+        InteractionComponent->OnInteractionDispatched.RemoveDynamic(
+            this,
+            &APedroEncounterDirector::HandleInteractionDispatched);
     }
 
     InteractionComponent = nullptr;
