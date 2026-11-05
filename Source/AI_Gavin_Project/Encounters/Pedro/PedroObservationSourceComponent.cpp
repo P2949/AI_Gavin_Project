@@ -36,8 +36,19 @@ bool UPedroObservationSourceComponent::ReportConfirmedAction(
         Event.WorldTimeSeconds = World->GetTimeSeconds();
     }
 
-    // This event reports world truth only. Perception and evidence acquisition
-    // belong to the Director/observer, in a separate implementation step.
+    // Reports world truth only; the Director decides what Pedro knows.
     OnWorldEventProduced.Broadcast(Event);
+    return true;
+}
+
+bool UPedroObservationSourceComponent::ReportOpportunityExposed()
+{
+    if (!bEvidenceEnabled || OpportunityId.IsNone() || !IsValid(GetOwner()))
+    {
+        return false;
+    }
+
+    // Player exposure is a world fact, not an observer perception event.
+    OnOpportunityExposed.Broadcast(OpportunityId);
     return true;
 }

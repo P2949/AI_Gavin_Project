@@ -124,6 +124,30 @@ EDataValidationResult APedroEncounterDirector::IsDataValid(
             EDataValidationResult::Invalid);
     }
 
+    // No definitions is valid while the old three-click prototype remains.
+    // When authored, each ID must be stable, nonempty and unique.
+    TSet<FName> SeenOpportunityIds;
+    for (const FPedroOpportunityDefinition& Definition : OpportunityDefinitions)
+    {
+        if (Definition.OpportunityId.IsNone() ||
+            SeenOpportunityIds.Contains(Definition.OpportunityId))
+        {
+            Context.AddError(FText::FromString(TEXT(
+                "Pedro opportunity IDs must be nonempty and unique.")));
+            Result = CombineDataValidationResults(
+                Result, EDataValidationResult::Invalid);
+        }
+        SeenOpportunityIds.Add(Definition.OpportunityId);
+    }
+
+    if (CoreSampleFraction < 0.01f || CoreSampleFraction > 1.0f)
+    {
+        Context.AddError(FText::FromString(TEXT(
+            "Pedro CoreSampleFraction must be between 0.01 and 1.0.")));
+        Result = CombineDataValidationResults(
+            Result, EDataValidationResult::Invalid);
+    }
+
     return Result;
 }
 
@@ -134,6 +158,14 @@ void APedroEncounterDirector::BeginPlay()
     Super::BeginPlay();
 
     ObservationState.Reset();
+    if (!ObservationState.Opportunities.Configure(OpportunityDefinitions))
+    {
+        // Invalid authoring is already reported by IsDataValid().
+        // Fail closed: do not count a partial or ambiguous opportunity set.
+        UE_LOG(LogTemp, Error,
+            TEXT("Pedro opportunity definitions contain duplicate or empty IDs."));
+    }
+
     UniqueInteractedActors.Reset();
     bHasPresentedOutcome = false;
     bOutcomeEvaluationQueued = false;
@@ -232,8 +264,25 @@ bool APedroEncounterDirector::RegisterObservationSource(
 
     Source->OnWorldEventProduced.AddUObject(
         this, &APedroEncounterDirector::HandleWorldEventProduced);
+    Source->OnOpportunityExposed.AddUObject(
+        this, &APedroEncounterDirector::HandleOpportunityExposed);
     BoundSources.Add(Source);
     return true;
+}
+
+void APedroEncounterDirector::HandleOpportunityExposed(FName OpportunityId)
+{
+    if (bHasPresentedOutcome)
+    {
+        return;
+    }
+
+    if (ObservationState.Opportunities.MarkPlayerExposed(OpportunityId))
+    {
+        UE_LOG(LogTemp, Log,
+            TEXT("Pedro opportunity player-exposed (not a sighting): %s"),
+            *OpportunityId.ToString());
+    }
 }
 
 void APedroEncounterDirector::HandleWorldEventProduced(
@@ -262,6 +311,21 @@ void APedroEncounterDirector::HandleWorldEventProduced(
             *Event.SubjectId.ToString(),
             *Event.OpportunityId.ToString(),
             ObservationState.GetEvidenceCount());
+
+        // Track only explicitly configured core/bonus opportunities.
+        // This threshold is informational until the final classification
+        // and completion systems are implemented.
+        const FPedroOpportunityState& Progress = ObservationState.Opportunities;
+        UE_LOG(LogTemp, Log,
+            TEXT("Pedro opportunity progress: core=%d/%d required=%d "
+                 "bonus=%d/%d thresholdReached=%s (no auto-resolution)"),
+            Progress.GetSampledCoreCount(),
+            Progress.GetCoreCount(),
+            Progress.GetRequiredCoreSamples(CoreSampleFraction),
+            Progress.GetSampledBonusCount(),
+            Progress.GetBonusCount(),
+            Progress.HasSufficientCoreSamples(CoreSampleFraction)
+                ? TEXT("yes") : TEXT("no"));
     }
 }
 
@@ -407,6 +471,7 @@ void APedroEncounterDirector::UnregisterObservationSources()
         if (UPedroObservationSourceComponent* ValidSource = Source.Get())
         {
             ValidSource->OnWorldEventProduced.RemoveAll(this);
+            ValidSource->OnOpportunityExposed.RemoveAll(this);
         }
     }
 

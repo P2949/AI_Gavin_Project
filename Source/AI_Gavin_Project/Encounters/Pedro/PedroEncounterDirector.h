@@ -54,10 +54,31 @@ public:
     bool bUsePrototypeAssumedAcquisition = false;
 
     /**
+     * Authored core/bonus choices for this Pedro level instance.
+     * IDs must match the ObservationSource component OpportunityIds.
+     * An unconfigured source can still produce evidence, but won't count
+     * toward the future encounter completion threshold.
+     */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Opportunities")
+    TArray<FPedroOpportunityDefinition> OpportunityDefinitions;
+
+    /**
+     * Provisional ratio of all authored core opportunities to sample before
+     * Pedro has enough information. Calculated for inspection only in this
+     * milestone; it DOES NOT yet replace the legacy three-click outcome.
+     */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        Category = "Pedro|Opportunities",
+        meta = (ClampMin = "0.01", ClampMax = "1.0", UIMin = "0.01", UIMax = "1.0"))
+    float CoreSampleFraction = 0.75f;
+
+    /**
      * Subscribe to a source spawned after BeginPlay. Level-placed sources
      * are found automatically. Returns false on invalid/duplicate sources.
      * Registering does not enable reporting or grant any knowledge.
+     * Exposed to Blueprints for dynamically spawned source actors.
      */
+    UFUNCTION(BlueprintCallable, Category = "Pedro|Observation")
     bool RegisterObservationSource(UPedroObservationSourceComponent* Source);
 
     /** Read-only native access for debugging and automated tests. */
@@ -164,6 +185,9 @@ private:
     /** Receives world truth; provisional acquisition is a separate decision. */
     void HandleWorldEventProduced(const FPedroBehaviourEvent& Event);
 
+    /** Receives a world fact of meaningful player exposure, NOT a sighting. */
+    void HandleOpportunityExposed(FName OpportunityId);
+
     /** Protects the final action's evidence from the old pre-interaction hook. */
     void QueuePrototypeOutcomeEvaluation();
 
@@ -179,4 +203,5 @@ private:
 
     // Test-only access to simulate a resolved encounter without hub setup.
     friend class FPedroDirectorAcquisitionLifecycleTest;
+    friend class FPedroDirectorOpportunityIntegrationTest;
 };

@@ -4,6 +4,7 @@
 
 #include "Encounters/Pedro/PedroEvidenceRules.h"
 #include "Encounters/Pedro/PedroObservationTypes.h"
+#include "Encounters/Pedro/PedroOpportunityState.h"
 
 #include "PedroObservationState.generated.h"
 
@@ -60,6 +61,18 @@ struct FPedroObservationState
         BlueprintReadOnly,
         Category = "Pedro|Observation")
     TArray<FPedroEvidenceRecord> EvidenceHistory;
+
+    // ------------------------------------------------------------
+    // Authored choice opportunities (not personality or perception)
+    // ------------------------------------------------------------
+
+    /**
+     * World exposure and Pedro-acquired responses are tracked separately.
+     * This does not advance the current legacy three-click outcome.
+     */
+    UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly,
+        Category = "Pedro|Opportunities")
+    FPedroOpportunityState Opportunities;
 
     // ------------------------------------------------------------
     // Derived behavioural dimensions
@@ -197,6 +210,11 @@ struct FPedroObservationState
 
         EvidenceHistory.Add(Evidence);
         PedroEvidenceRules::ApplyAcceptedEvidence(*this, EvidenceHistory.Last());
+
+        // Only a genuinely accepted record can mark Pedro's knowledge of a
+        // response. Duplicate events, rejected provenance and world truth
+        // alone must not advance the opportunity count.
+        Opportunities.NoteAcquiredResponse(Evidence.Event.OpportunityId);
         return true;
     }
 
@@ -219,6 +237,7 @@ struct FPedroObservationState
         UniqueInteractionCount = 0;
 
         EvidenceHistory.Reset();
+        Opportunities.Reset();
         TraitScores = FPedroTraitScores{};
 
         HelpedNPCCount = 0;

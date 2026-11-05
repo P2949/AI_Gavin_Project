@@ -27,12 +27,16 @@ void APedroPrototypeInteractableActor::Interact_Implementation(
         return;
     }
 
-    // This state transition confirms that the prototype inspection happened.
-    // OnInteractionDispatched runs earlier and does not prove success.
+    // The inspection is real; an attempted dispatch alone would not qualify.
     ++SuccessfulInspectionCount;
 
     if (IsValid(ObservationSource))
     {
+        // A completed inspection also demonstrates meaningful exposure.
+        // Future refusal/abandonment activities must explicitly expose the
+        // choice before they can report a response (including ignoring it).
+        ObservationSource->ReportOpportunityExposed();
+
         const EPedroEvidenceKind Kind =
             SuccessfulInspectionCount == 1
                 ? EPedroEvidenceKind::InspectedOptionalObject
