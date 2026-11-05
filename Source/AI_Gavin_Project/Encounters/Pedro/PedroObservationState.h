@@ -163,15 +163,22 @@ struct FPedroObservationState
      * Rejects invalid/duplicate events and currently unsupported
      * knowledge sources (reported or inferred).
      *
+     * DirectObservation is reserved for actual perception. PrototypeAssumed
+     * is a temporary, explicitly unverified development-mode acquisition.
+     *
      * Accepted evidence updates the history and derived facts together.
      * This function does not perform sight checks or final classification;
      * callers must perform acquisition checks before submitting evidence.
      */
     bool RecordEvidence(const FPedroEvidenceRecord& Evidence)
     {
+        const bool bSupportedKnowledgeSource =
+            Evidence.KnowledgeSource == EPedroKnowledgeSource::DirectObservation ||
+            Evidence.KnowledgeSource == EPedroKnowledgeSource::PrototypeAssumed;
+
         if (!Evidence.Event.EventId.IsValid() ||
             Evidence.Event.Kind == EPedroEvidenceKind::None ||
-            Evidence.KnowledgeSource != EPedroKnowledgeSource::DirectObservation ||
+            !bSupportedKnowledgeSource ||
             (Evidence.Event.SubjectId.IsNone() &&
              Evidence.Event.OpportunityId.IsNone()))
         {

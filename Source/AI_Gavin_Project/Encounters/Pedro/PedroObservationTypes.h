@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -56,7 +55,14 @@ enum class EPedroKnowledgeSource : uint8
     None,
     DirectObservation,
     Reported,
-    Inferred
+    Inferred,
+
+    /**
+     * Temporary prototype-only acquisition without a perception check.
+     * This is NOT an actual sighting and must not be described as witnessed.
+     * Real observer perception will eventually produce DirectObservation.
+     */
+    PrototypeAssumed
 };
 
 /**
