@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 
 #include "Encounters/Pedro/PedroObservationState.h"
 
@@ -9,6 +10,7 @@
 
 class UEncounterDefinition;
 class UPlayerInteractionComponent;
+class UPedroObservationSourceComponent;
 class FDataValidationContext;
 
 /**
@@ -20,6 +22,9 @@ class FDataValidationContext;
  *
  * Observation, interpretation, and presentation are deliberately kept
  * separate so each can evolve without changing the shared player systems.
+ *
+ * Confirmed authored world events can be acquired in a deliberately
+ * provisional mode; that mode does NOT implement observer perception.
  */
 UCLASS()
 class AI_GAVIN_PROJECT_API APedroEncounterDirector : public AActor
@@ -33,6 +38,54 @@ public:
     virtual EDataValidationResult IsDataValid(
         FDataValidationContext &Context) const override;
 #endif
+
+    /**
+     * TEMPORARY PROTOTYPE MODE, NOT ACTUAL PERCEPTION.
+     *
+     * Valid events from registered Pedro sources become observer knowledge
+     * marked PrototypeAssumed. This does NOT mean Pedro physically saw them.
+     * Disabled by default. Enable deliberately on the level instance.
+     */
+    UPROPERTY(
+        EditInstanceOnly,
+        BlueprintReadWrite,
+        Category = "Pedro|Prototype|Acquisition",
+        meta = (DisplayName = "Assume Awareness (Prototype Only - No LOS)"))
+    bool bUsePrototypeAssumedAcquisition = false;
+
+    /**
+     * Authored core/bonus choices for this Pedro level instance.
+     * IDs must match the ObservationSource component OpportunityIds.
+     * An unconfigured source can still produce evidence, but won't count
+     * toward the future encounter completion threshold.
+     */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Opportunities")
+    TArray<FPedroOpportunityDefinition> OpportunityDefinitions;
+
+    /**
+     * Provisional ratio of all authored core opportunities to sample before
+     * Pedro has enough information. Calculated for inspection only in this
+     * milestone; it DOES NOT yet replace the legacy three-click outcome.
+     */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        Category = "Pedro|Opportunities",
+        meta = (ClampMin = "0.01", ClampMax = "1.0", UIMin = "0.01", UIMax = "1.0"))
+    float CoreSampleFraction = 0.75f;
+
+    /**
+     * Subscribe to a source spawned after BeginPlay. Level-placed sources
+     * are found automatically. Returns false on invalid/duplicate sources.
+     * Registering does not enable reporting or grant any knowledge.
+     * Exposed to Blueprints for dynamically spawned source actors.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Pedro|Observation")
+    bool RegisterObservationSource(UPedroObservationSourceComponent* Source);
+
+    /** Read-only native access for debugging and automated tests. */
+    const FPedroObservationState& GetObservationState() const
+    {
+        return ObservationState;
+    }
 
 protected:
     virtual void BeginPlay() override;
@@ -48,6 +101,9 @@ protected:
     /**
      * Evaluates whether enough observations have been collected for this
      * prototype to present an outcome.
+     *
+     * Queued until the next tick after a qualifying interaction request,
+     * allowing the current interaction to finish reporting its world event.
      */
     void EvaluatePrototypeOutcome();
 
@@ -120,10 +176,32 @@ private:
         AActor *OutcomeActor,
         bool bActive);
 
+    /** One-time discovery of level-placed Pedro observation components. */
+    void DiscoverLevelObservationSources();
+
+    /** Remove every native delegate subscription established by this actor. */
+    void UnregisterObservationSources();
+
+    /** Receives world truth; provisional acquisition is a separate decision. */
+    void HandleWorldEventProduced(const FPedroBehaviourEvent& Event);
+
+    /** Receives a world fact of meaningful player exposure, NOT a sighting. */
+    void HandleOpportunityExposed(FName OpportunityId);
+
+    /** Protects the final action's evidence from the old pre-interaction hook. */
+    void QueuePrototypeOutcomeEvaluation();
+
     UPROPERTY(Transient)
     TObjectPtr<UPlayerInteractionComponent> InteractionComponent;
 
     TSet<TWeakObjectPtr<AActor>> UniqueInteractedActors;
+    TArray<TWeakObjectPtr<UPedroObservationSourceComponent>> BoundSources;
 
+    FTimerHandle PendingPrototypeOutcomeTimer;
+    bool bOutcomeEvaluationQueued = false;
     bool bHasPresentedOutcome = false;
+
+    // Test-only access to simulate a resolved encounter without hub setup.
+    friend class FPedroDirectorAcquisitionLifecycleTest;
+    friend class FPedroDirectorOpportunityIntegrationTest;
 };
