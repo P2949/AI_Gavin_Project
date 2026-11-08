@@ -9,6 +9,14 @@
 
 #include "PedroEncounterDirector.generated.h"
 
+/** Legacy remains the default. Evidence-driven is opt-in on a level instance. */
+UENUM(BlueprintType)
+enum class EPedroCompletionPolicy : uint8
+{
+    LegacyInteractionCount UMETA(DisplayName = "Legacy interaction count"),
+    EvidenceDriven UMETA(DisplayName = "Evidence-driven completion")
+};
+
 class UEncounterDefinition;
 class UPlayerInteractionComponent;
 class UPedroObservationSourceComponent;
@@ -82,6 +90,11 @@ public:
     UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Diagnostics")
     bool bEnableCompletionGateShadowEvaluation = true;
 
+    /** No production asset changes: legacy stays authoritative by default. */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Completion")
+    EPedroCompletionPolicy CompletionPolicy =
+        EPedroCompletionPolicy::LegacyInteractionCount;
+
     /**
      * Subscribe to a source spawned after BeginPlay. Level-placed sources
      * are found automatically. Returns false on invalid/duplicate sources.
@@ -106,6 +119,17 @@ public:
     const FPedroCompletionDecision& GetShadowCompletionDecision() const
     {
         return ShadowCompletionDecision;
+    }
+
+    /** Valid only after successful shared progression resolution. */
+    bool HasFinalClassification() const
+    {
+        return bHasFinalClassification;
+    }
+
+    const FPedroClassificationResult& GetFinalClassification() const
+    {
+        return FinalClassification;
     }
 
 protected:
@@ -164,6 +188,16 @@ protected:
         Category = "Pedro|Prototype")
     TObjectPtr<AActor> RepetitiveOutcomeActor;
 
+    /** Evidence-driven mode requires all three DIFFERENT world-placed actors. */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Completion")
+    TObjectPtr<AActor> GentleOutcomeActor;
+
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Completion")
+    TObjectPtr<AActor> SeekingOutcomeActor;
+
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Completion")
+    TObjectPtr<AActor> DisruptiveOutcomeActor;
+
     /**
      * Number of total interaction requests required before this prototype
      * produces an interpretation.
@@ -216,6 +250,10 @@ private:
     void QueueShadowCompletionEvaluation();
     void EvaluateShadowCompletionGate();
 
+    /** Active policy uses accepted evidence, never dispatched click count. */
+    void QueueActiveCompletionEvaluation();
+    void EvaluateActiveCompletion();
+
     UPROPERTY(Transient)
     TObjectPtr<UPlayerInteractionComponent> InteractionComponent;
 
@@ -224,6 +262,10 @@ private:
 
     FTimerHandle PendingPrototypeOutcomeTimer;
     FTimerHandle PendingShadowCompletionTimer;
+    FTimerHandle PendingActiveCompletionTimer;
+    FPedroClassificationResult FinalClassification;
+    bool bActiveCompletionQueued = false;
+    bool bHasFinalClassification = false;
     FPedroCompletionDecision ShadowCompletionDecision;
     bool bShadowCompletionQueued = false;
     bool bHasShadowCompletionDecision = false;
@@ -240,4 +282,5 @@ private:
     friend class FPedroDirectorShadowDisabledTest;
     friend class FPedroDirectorShadowDuplicateLifecycleTest;
     friend class FPedroDirectorShadowLegacyTest;
+    friend struct FPedroActiveDirectorTestAccess;
 };

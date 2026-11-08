@@ -1,5 +1,6 @@
 #include "Encounters/Pedro/PedroEncounterDirector.h"
 
+#include "Encounters/Pedro/PedroActivePresentation.h"
 #include "Encounters/Pedro/PedroObservationSourceComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -81,87 +82,149 @@ EDataValidationResult APedroEncounterDirector::IsDataValid(
             EDataValidationResult::Invalid);
     }
 
-    if (!IsValid(ExploratoryOutcomeActor))
+    if (CompletionPolicy == EPedroCompletionPolicy::LegacyInteractionCount)
     {
-        Context.AddError(
-            FText::FromString(
-                TEXT(
-                    "Pedro encounter director requires an "
-                    "ExploratoryOutcomeActor.")));
+        if (!IsValid(ExploratoryOutcomeActor))
+        {
+            Context.AddError(
+                FText::FromString(
+                    TEXT(
+                        "Pedro encounter director requires an "
+                        "ExploratoryOutcomeActor.")));
 
-        Result = CombineDataValidationResults(
-            Result,
-            EDataValidationResult::Invalid);
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+
+        if (!IsValid(RepetitiveOutcomeActor))
+        {
+            Context.AddError(
+                FText::FromString(
+                    TEXT(
+                        "Pedro encounter director requires a "
+                        "RepetitiveOutcomeActor.")));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+
+        if (IsValid(ExploratoryOutcomeActor) &&
+            ExploratoryOutcomeActor == RepetitiveOutcomeActor)
+        {
+            Context.AddError(
+                FText::FromString(
+                    TEXT(
+                        "Pedro encounter director outcome actors "
+                        "must be different actors.")));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+
+        if (InteractionsBeforeOutcome < 1)
+        {
+            Context.AddError(
+                FText::FromString(
+                    TEXT(
+                        "InteractionsBeforeOutcome must be at "
+                        "least 1.")));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+
+        if (UniqueInteractionsForExploratoryOutcome < 1)
+        {
+            Context.AddError(
+                FText::FromString(
+                    TEXT(
+                        "UniqueInteractionsForExploratoryOutcome "
+                        "must be at least 1.")));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+
+        if (UniqueInteractionsForExploratoryOutcome >
+            InteractionsBeforeOutcome)
+        {
+            Context.AddError(
+                FText::FromString(
+                    TEXT(
+                        "UniqueInteractionsForExploratoryOutcome "
+                        "cannot exceed InteractionsBeforeOutcome.")));
+
+            Result = CombineDataValidationResults(
+                Result,
+                EDataValidationResult::Invalid);
+        }
+
+    }
+    else
+    {
+        if (!IsValid(GentleOutcomeActor) ||
+            !IsValid(SeekingOutcomeActor) ||
+            !IsValid(DisruptiveOutcomeActor))
+        {
+            Context.AddError(FText::FromString(TEXT(
+                "Evidence-driven Pedro requires Gentle, Seeking and Disruptive actors.")));
+            Result = CombineDataValidationResults(
+                Result, EDataValidationResult::Invalid);
+        }
+        else if (GentleOutcomeActor == SeekingOutcomeActor ||
+                 GentleOutcomeActor == DisruptiveOutcomeActor ||
+                 SeekingOutcomeActor == DisruptiveOutcomeActor)
+        {
+            Context.AddError(FText::FromString(TEXT(
+                "Evidence-driven Pedro outcome actors must all be distinct.")));
+            Result = CombineDataValidationResults(
+                Result, EDataValidationResult::Invalid);
+        }
+
+        bool bHasCoreOpportunity = false;
+        for (const FPedroOpportunityDefinition& Definition : OpportunityDefinitions)
+        {
+            if (Definition.Tier == EPedroOpportunityTier::Core)
+            {
+                bHasCoreOpportunity = true;
+                break;
+            }
+        }
+        if (!bHasCoreOpportunity)
+        {
+            Context.AddError(FText::FromString(TEXT(
+                "Evidence-driven Pedro requires at least one authored core opportunity.")));
+            Result = CombineDataValidationResults(
+                Result, EDataValidationResult::Invalid);
+        }
     }
 
-    if (!IsValid(RepetitiveOutcomeActor))
+    // CompletionPolicy must be one of the two supported values.
+    if (CompletionPolicy != EPedroCompletionPolicy::LegacyInteractionCount &&
+        CompletionPolicy != EPedroCompletionPolicy::EvidenceDriven)
     {
-        Context.AddError(
-            FText::FromString(
-                TEXT(
-                    "Pedro encounter director requires a "
-                    "RepetitiveOutcomeActor.")));
-
+        Context.AddError(FText::FromString(TEXT(
+            "Pedro completion policy has an unsupported value.")));
         Result = CombineDataValidationResults(
-            Result,
-            EDataValidationResult::Invalid);
+            Result, EDataValidationResult::Invalid);
     }
 
-    if (IsValid(ExploratoryOutcomeActor) &&
-        ExploratoryOutcomeActor == RepetitiveOutcomeActor)
+    if (CompletionPolicy == EPedroCompletionPolicy::EvidenceDriven &&
+        IsValid(EncounterDefinition) &&
+        EncounterDefinition->GetEncounterId().IsNone())
     {
-        Context.AddError(
-            FText::FromString(
-                TEXT(
-                    "Pedro encounter director outcome actors "
-                    "must be different actors.")));
-
+        Context.AddError(FText::FromString(TEXT(
+            "Evidence-driven Pedro requires a nonempty encounter ID.")));
         Result = CombineDataValidationResults(
-            Result,
-            EDataValidationResult::Invalid);
+            Result, EDataValidationResult::Invalid);
     }
 
-    if (InteractionsBeforeOutcome < 1)
-    {
-        Context.AddError(
-            FText::FromString(
-                TEXT(
-                    "InteractionsBeforeOutcome must be at "
-                    "least 1.")));
-
-        Result = CombineDataValidationResults(
-            Result,
-            EDataValidationResult::Invalid);
-    }
-
-    if (UniqueInteractionsForExploratoryOutcome < 1)
-    {
-        Context.AddError(
-            FText::FromString(
-                TEXT(
-                    "UniqueInteractionsForExploratoryOutcome "
-                    "must be at least 1.")));
-
-        Result = CombineDataValidationResults(
-            Result,
-            EDataValidationResult::Invalid);
-    }
-
-    if (UniqueInteractionsForExploratoryOutcome >
-        InteractionsBeforeOutcome)
-    {
-        Context.AddError(
-            FText::FromString(
-                TEXT(
-                    "UniqueInteractionsForExploratoryOutcome "
-                    "cannot exceed InteractionsBeforeOutcome.")));
-
-        Result = CombineDataValidationResults(
-            Result,
-            EDataValidationResult::Invalid);
-    }
-
-    // No definitions is valid while the old three-click prototype remains.
+    // No definitions is valid while the old interaction-count prototype remains.
     // When authored, each ID must be stable, nonempty and unique.
     TSet<FName> SeenOpportunityIds;
     for (const FPedroOpportunityDefinition& Definition : OpportunityDefinitions)
@@ -177,7 +240,8 @@ EDataValidationResult APedroEncounterDirector::IsDataValid(
         SeenOpportunityIds.Add(Definition.OpportunityId);
     }
 
-    if (CoreSampleFraction < 0.01f || CoreSampleFraction > 1.0f)
+    if (!FMath::IsFinite(CoreSampleFraction) ||
+        CoreSampleFraction < 0.01f || CoreSampleFraction > 1.0f)
     {
         Context.AddError(FText::FromString(TEXT(
             "Pedro CoreSampleFraction must be between 0.01 and 1.0.")));
@@ -209,6 +273,9 @@ void APedroEncounterDirector::BeginPlay()
     bShadowCompletionQueued = false;
     bHasShadowCompletionDecision = false;
     ShadowCompletionDecision = FPedroCompletionDecision{};
+    bActiveCompletionQueued = false;
+    bHasFinalClassification = false;
+    FinalClassification = FPedroClassificationResult{};
 
     SetOutcomeActorActive(
         ExploratoryOutcomeActor,
@@ -217,6 +284,15 @@ void APedroEncounterDirector::BeginPlay()
     SetOutcomeActorActive(
         RepetitiveOutcomeActor,
         false);
+
+    // Preserve the legacy level completely, even if these optional actors
+    // are mistakenly assigned to an actor also used by the legacy path.
+    if (CompletionPolicy == EPedroCompletionPolicy::EvidenceDriven)
+    {
+        SetOutcomeActorActive(GentleOutcomeActor, false);
+        SetOutcomeActorActive(SeekingOutcomeActor, false);
+        SetOutcomeActorActive(DisruptiveOutcomeActor, false);
+    }
 
     // Factual sources do not require a valid player interaction component.
     // Register them before the later player lookup can return early.
@@ -323,6 +399,7 @@ void APedroEncounterDirector::HandleOpportunityExposed(FName OpportunityId)
             TEXT("Pedro opportunity player-exposed (not a sighting): %s"),
             *OpportunityId.ToString());
         QueueShadowCompletionEvaluation();
+        QueueActiveCompletionEvaluation();
     }
 }
 
@@ -369,6 +446,7 @@ void APedroEncounterDirector::HandleWorldEventProduced(
                 ? TEXT("yes") : TEXT("no"));
 
         QueueShadowCompletionEvaluation();
+        QueueActiveCompletionEvaluation();
     }
 }
 
@@ -377,6 +455,12 @@ void APedroEncounterDirector::HandleInteractionDispatched(
     AActor *Interactor)
 {
     static_cast<void>(Interactor);
+
+    // In active mode, dispatched clicks never advance legacy completion.
+    if (CompletionPolicy != EPedroCompletionPolicy::LegacyInteractionCount)
+    {
+        return;
+    }
 
     if (bHasPresentedOutcome ||
         !IsValid(InteractionTarget))
@@ -403,7 +487,8 @@ void APedroEncounterDirector::HandleInteractionDispatched(
 
 void APedroEncounterDirector::QueuePrototypeOutcomeEvaluation()
 {
-    if (bHasPresentedOutcome || bOutcomeEvaluationQueued)
+    if (CompletionPolicy != EPedroCompletionPolicy::LegacyInteractionCount ||
+        bHasPresentedOutcome || bOutcomeEvaluationQueued)
     {
         return;
     }
@@ -491,11 +576,135 @@ void APedroEncounterDirector::EvaluateShadowCompletionGate()
         Candidate);
 }
 
+void APedroEncounterDirector::QueueActiveCompletionEvaluation()
+{
+    if (CompletionPolicy != EPedroCompletionPolicy::EvidenceDriven ||
+        bHasPresentedOutcome || bActiveCompletionQueued)
+    {
+        return;
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        // Player exposure and acquired response can arrive in either order.
+        // Defer both until the interaction's factual events are complete.
+        bActiveCompletionQueued = true;
+        PendingActiveCompletionTimer = World->GetTimerManager().SetTimerForNextTick(
+            this, &APedroEncounterDirector::EvaluateActiveCompletion);
+    }
+    else
+    {
+        // Worldless test actors cannot resolve shared progression.
+        EvaluateActiveCompletion();
+    }
+}
+
+void APedroEncounterDirector::EvaluateActiveCompletion()
+{
+    bActiveCompletionQueued = false;
+
+    if (CompletionPolicy != EPedroCompletionPolicy::EvidenceDriven ||
+        bHasPresentedOutcome)
+    {
+        return;
+    }
+
+    const FPedroCompletionDecision Decision =
+        PedroCompletionGate::Evaluate(ObservationState, CoreSampleFraction);
+    if (!Decision.CanConclude())
+    {
+        return;
+    }
+
+    const FPedroPresentationPlan Plan = PedroActivePresentation::Prepare(
+        Decision, GentleOutcomeActor, SeekingOutcomeActor, DisruptiveOutcomeActor);
+    if (!Plan.IsReady())
+    {
+        UE_LOG(LogTemp, Display,
+            TEXT("PEDRO_ACTIVE blocked=InvalidPresentation status=%d"),
+            static_cast<int32>(Plan.Status));
+        return;
+    }
+
+    if (!IsValid(EncounterDefinition))
+    {
+        UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=MissingEncounterDefinition"));
+        return;
+    }
+    if (EncounterDefinition->GetEncounterId().IsNone())
+    {
+        UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=EmptyEncounterId"));
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!IsValid(World))
+    {
+        UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=MissingWorld"));
+        return;
+    }
+
+    // Reject cross-world and stale actor references before touching progress.
+    if (GentleOutcomeActor->GetWorld() != World ||
+        SeekingOutcomeActor->GetWorld() != World ||
+        DisruptiveOutcomeActor->GetWorld() != World)
+    {
+        UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=ActorWorldMismatch"));
+        return;
+    }
+
+    UGameInstance* GameInstance = World->GetGameInstance();
+    UEncounterProgressSubsystem* Progress = GameInstance
+        ? GameInstance->GetSubsystem<UEncounterProgressSubsystem>()
+        : nullptr;
+    if (!IsValid(Progress))
+    {
+        UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=MissingProgressSubsystem"));
+        return;
+    }
+    if (Progress->IsEncounterResolved(EncounterDefinition))
+    {
+        UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=AlreadyResolved"));
+        return;
+    }
+
+    // Lock against reentrant events before ResolveEncounter broadcasts.
+    // Roll back visuals and local state if that call refuses resolution.
+    bHasPresentedOutcome = true;
+    bHasFinalClassification = true;
+    FinalClassification = Decision.Classification;
+    SetOutcomeActorActive(GentleOutcomeActor,
+        Plan.Interpretation == EPedroInterpretation::Gentle);
+    SetOutcomeActorActive(SeekingOutcomeActor,
+        Plan.Interpretation == EPedroInterpretation::Seeking);
+    SetOutcomeActorActive(DisruptiveOutcomeActor,
+        Plan.Interpretation == EPedroInterpretation::Disruptive);
+
+    if (!Progress->ResolveEncounter(EncounterDefinition))
+    {
+        SetOutcomeActorActive(GentleOutcomeActor, false);
+        SetOutcomeActorActive(SeekingOutcomeActor, false);
+        SetOutcomeActorActive(DisruptiveOutcomeActor, false);
+        bHasPresentedOutcome = false;
+        bHasFinalClassification = false;
+        FinalClassification = FPedroClassificationResult{};
+        UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=ResolutionRejected"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Display,
+        TEXT("PEDRO_OUTCOME policy=EvidenceDriven interpretation=%s "
+             "sampledCore=%d requiredCore=%d resolved=yes actualLOS=no"),
+        PedroShadowInterpretationName(Plan.Interpretation),
+        Decision.SampledCoreCount, Decision.RequiredCoreSamples);
+}
+
 void APedroEncounterDirector::EvaluatePrototypeOutcome()
 {
     bOutcomeEvaluationQueued = false;
 
-    if (bHasPresentedOutcome ||
+    if (CompletionPolicy != EPedroCompletionPolicy::LegacyInteractionCount ||
+        bHasPresentedOutcome ||
         ObservationState.InteractionCount <
             InteractionsBeforeOutcome)
     {
@@ -513,7 +722,8 @@ void APedroEncounterDirector::EvaluatePrototypeOutcome()
 void APedroEncounterDirector::PresentPrototypeOutcome(
     bool bExploratoryOutcome)
 {
-    if (bHasPresentedOutcome)
+    if (CompletionPolicy != EPedroCompletionPolicy::LegacyInteractionCount ||
+        bHasPresentedOutcome)
     {
         return;
     }
@@ -605,6 +815,7 @@ void APedroEncounterDirector::EndPlay(
     {
         World->GetTimerManager().ClearTimer(PendingPrototypeOutcomeTimer);
         World->GetTimerManager().ClearTimer(PendingShadowCompletionTimer);
+        World->GetTimerManager().ClearTimer(PendingActiveCompletionTimer);
     }
 
     UnregisterObservationSources();
@@ -612,6 +823,7 @@ void APedroEncounterDirector::EndPlay(
     UniqueInteractedActors.Reset();
     bOutcomeEvaluationQueued = false;
     bShadowCompletionQueued = false;
+    bActiveCompletionQueued = false;
 
     Super::EndPlay(EndPlayReason);
 }
