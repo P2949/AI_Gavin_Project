@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "TimerManager.h"
 
+#include "Encounters/Pedro/PedroCompletionGate.h"
 #include "Encounters/Pedro/PedroObservationState.h"
 
 #include "PedroEncounterDirector.generated.h"
@@ -73,6 +74,15 @@ public:
     float CoreSampleFraction = 0.75f;
 
     /**
+     * Phase B2a: diagnostics only. Evaluation can report readiness, but
+     * MUST NOT activate outcomes, call ResolveEncounter, or change the
+     * legacy interaction-count completion path. Enabled by default to
+     * exercise the existing greybox level without editing binary assets.
+     */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Pedro|Diagnostics")
+    bool bEnableCompletionGateShadowEvaluation = true;
+
+    /**
      * Subscribe to a source spawned after BeginPlay. Level-placed sources
      * are found automatically. Returns false on invalid/duplicate sources.
      * Registering does not enable reporting or grant any knowledge.
@@ -85,6 +95,17 @@ public:
     const FPedroObservationState& GetObservationState() const
     {
         return ObservationState;
+    }
+
+    /** Shadow snapshot is valid only after an exposure or accepted event. */
+    bool HasShadowCompletionDecision() const
+    {
+        return bHasShadowCompletionDecision;
+    }
+
+    const FPedroCompletionDecision& GetShadowCompletionDecision() const
+    {
+        return ShadowCompletionDecision;
     }
 
 protected:
@@ -191,6 +212,10 @@ private:
     /** Protects the final action's evidence from the old pre-interaction hook. */
     void QueuePrototypeOutcomeEvaluation();
 
+    /** Read-only, next-tick evaluation after the completed interaction. */
+    void QueueShadowCompletionEvaluation();
+    void EvaluateShadowCompletionGate();
+
     UPROPERTY(Transient)
     TObjectPtr<UPlayerInteractionComponent> InteractionComponent;
 
@@ -198,10 +223,21 @@ private:
     TArray<TWeakObjectPtr<UPedroObservationSourceComponent>> BoundSources;
 
     FTimerHandle PendingPrototypeOutcomeTimer;
+    FTimerHandle PendingShadowCompletionTimer;
+    FPedroCompletionDecision ShadowCompletionDecision;
+    bool bShadowCompletionQueued = false;
+    bool bHasShadowCompletionDecision = false;
     bool bOutcomeEvaluationQueued = false;
     bool bHasPresentedOutcome = false;
 
     // Test-only access to simulate a resolved encounter without hub setup.
     friend class FPedroDirectorAcquisitionLifecycleTest;
     friend class FPedroDirectorOpportunityIntegrationTest;
+    friend struct FPedroDirectorShadowTestAccess;
+    friend class FPedroDirectorShadowAcquisitionRequiredTest;
+    friend class FPedroDirectorShadowExposureFirstTest;
+    friend class FPedroDirectorShadowEvidenceFirstTest;
+    friend class FPedroDirectorShadowDisabledTest;
+    friend class FPedroDirectorShadowDuplicateLifecycleTest;
+    friend class FPedroDirectorShadowLegacyTest;
 };
