@@ -16,6 +16,43 @@
 #include "Misc/DataValidation.h"
 #endif
 
+namespace
+{
+const TCHAR* PedroShadowStatusName(EPedroCompletionStatus Status)
+{
+    switch (Status)
+    {
+    case EPedroCompletionStatus::NoCoreOpportunities:
+        return TEXT("NoCoreOpportunities");
+    case EPedroCompletionStatus::InvalidSampleFraction:
+        return TEXT("InvalidSampleFraction");
+    case EPedroCompletionStatus::NoAcquiredEvidence:
+        return TEXT("NoAcquiredEvidence");
+    case EPedroCompletionStatus::InsufficientCoreSamples:
+        return TEXT("InsufficientCoreSamples");
+    case EPedroCompletionStatus::InconsistentSampleEvidence:
+        return TEXT("InconsistentSampleEvidence");
+    case EPedroCompletionStatus::Ready:
+        return TEXT("Ready");
+    }
+    return TEXT("Unknown");
+}
+
+const TCHAR* PedroShadowInterpretationName(EPedroInterpretation Interpretation)
+{
+    switch (Interpretation)
+    {
+    case EPedroInterpretation::Gentle:
+        return TEXT("Gentle");
+    case EPedroInterpretation::Seeking:
+        return TEXT("Seeking");
+    case EPedroInterpretation::Disruptive:
+        return TEXT("Disruptive");
+    }
+    return TEXT("Unknown");
+}
+} // namespace
+
 APedroEncounterDirector::APedroEncounterDirector()
 {
     PrimaryActorTick.bCanEverTick = false;
@@ -169,6 +206,9 @@ void APedroEncounterDirector::BeginPlay()
     UniqueInteractedActors.Reset();
     bHasPresentedOutcome = false;
     bOutcomeEvaluationQueued = false;
+    bShadowCompletionQueued = false;
+    bHasShadowCompletionDecision = false;
+    ShadowCompletionDecision = FPedroCompletionDecision{};
 
     SetOutcomeActorActive(
         ExploratoryOutcomeActor,
@@ -282,6 +322,7 @@ void APedroEncounterDirector::HandleOpportunityExposed(FName OpportunityId)
         UE_LOG(LogTemp, Log,
             TEXT("Pedro opportunity player-exposed (not a sighting): %s"),
             *OpportunityId.ToString());
+        QueueShadowCompletionEvaluation();
     }
 }
 
@@ -326,6 +367,8 @@ void APedroEncounterDirector::HandleWorldEventProduced(
             Progress.GetBonusCount(),
             Progress.HasSufficientCoreSamples(CoreSampleFraction)
                 ? TEXT("yes") : TEXT("no"));
+
+        QueueShadowCompletionEvaluation();
     }
 }
 
@@ -376,6 +419,76 @@ void APedroEncounterDirector::QueuePrototypeOutcomeEvaluation()
         // Only needed when evaluating a worldless Director in isolated tests.
         EvaluatePrototypeOutcome();
     }
+}
+
+void APedroEncounterDirector::QueueShadowCompletionEvaluation()
+{
+    if (!bEnableCompletionGateShadowEvaluation || bShadowCompletionQueued)
+    {
+        return;
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        // The pre-interaction hook runs before Interact(). Coalesce exposure
+        // and evidence emitted by that action into one next-tick snapshot.
+        bShadowCompletionQueued = true;
+        PendingShadowCompletionTimer = World->GetTimerManager().SetTimerForNextTick(
+            this, &APedroEncounterDirector::EvaluateShadowCompletionGate);
+    }
+    else
+    {
+        // Standalone automation tests use worldless transient Directors.
+        EvaluateShadowCompletionGate();
+    }
+}
+
+void APedroEncounterDirector::EvaluateShadowCompletionGate()
+{
+    bShadowCompletionQueued = false;
+
+    if (!bEnableCompletionGateShadowEvaluation)
+    {
+        return;
+    }
+
+    const FPedroCompletionDecision NewDecision =
+        PedroCompletionGate::Evaluate(ObservationState, CoreSampleFraction);
+
+    const bool bMeaningfulChange =
+        !bHasShadowCompletionDecision ||
+        NewDecision.Status != ShadowCompletionDecision.Status ||
+        NewDecision.SampledCoreCount != ShadowCompletionDecision.SampledCoreCount ||
+        NewDecision.SampledBonusCount != ShadowCompletionDecision.SampledBonusCount ||
+        (NewDecision.CanConclude() &&
+         (!ShadowCompletionDecision.CanConclude() ||
+          NewDecision.Classification.Interpretation !=
+              ShadowCompletionDecision.Classification.Interpretation));
+
+    ShadowCompletionDecision = NewDecision;
+    bHasShadowCompletionDecision = true;
+
+    if (!bMeaningfulChange)
+    {
+        return;
+    }
+
+    const TCHAR* Candidate = NewDecision.CanConclude()
+        ? PedroShadowInterpretationName(NewDecision.Classification.Interpretation)
+        : TEXT("None");
+
+    UE_LOG(LogTemp, Display,
+        TEXT("PEDRO_SHADOW status=%s sampledCore=%d totalCore=%d "
+             "requiredCore=%d sampledBonus=%d acquired=%d ready=%s "
+             "candidate=%s readOnly=yes actualLOS=no"),
+        PedroShadowStatusName(NewDecision.Status),
+        NewDecision.SampledCoreCount,
+        NewDecision.CoreCount,
+        NewDecision.RequiredCoreSamples,
+        NewDecision.SampledBonusCount,
+        NewDecision.AcquiredEvidenceCount,
+        NewDecision.CanConclude() ? TEXT("yes") : TEXT("no"),
+        Candidate);
 }
 
 void APedroEncounterDirector::EvaluatePrototypeOutcome()
@@ -491,12 +604,14 @@ void APedroEncounterDirector::EndPlay(
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(PendingPrototypeOutcomeTimer);
+        World->GetTimerManager().ClearTimer(PendingShadowCompletionTimer);
     }
 
     UnregisterObservationSources();
     InteractionComponent = nullptr;
     UniqueInteractedActors.Reset();
     bOutcomeEvaluationQueued = false;
+    bShadowCompletionQueued = false;
 
     Super::EndPlay(EndPlayReason);
 }
