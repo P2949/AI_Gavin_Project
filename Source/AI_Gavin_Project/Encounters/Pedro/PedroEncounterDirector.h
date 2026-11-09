@@ -283,4 +283,5 @@ private:
     friend class FPedroDirectorShadowDuplicateLifecycleTest;
     friend class FPedroDirectorShadowLegacyTest;
     friend struct FPedroActiveDirectorTestAccess;
+    friend class APedroActiveWorldValidationHarness;
 };
