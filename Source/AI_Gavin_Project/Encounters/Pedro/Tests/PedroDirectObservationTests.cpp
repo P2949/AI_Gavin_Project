@@ -8,14 +8,14 @@ namespace
 {
 constexpr float Range = 1000.0f;
 constexpr float HalfAngle = 60.0f;
-const FVector Eye(0.0, 0.0, 0.0);
+const FVector TestEyeLocation(0.0, 0.0, 0.0);
 const FVector TestForwardDirection(1.0, 0.0, 0.0);
 
 EPedroDirectObservationStatus Check(const FVector& Position,
     float MaxRange = Range, float HalfFov = HalfAngle)
 {
     return PedroDirectObservation::CheckGeometry(
-        Eye, TestForwardDirection, Position, MaxRange, HalfFov);
+        TestEyeLocation, TestForwardDirection, Position, MaxRange, HalfFov);
 }
 }
 
@@ -124,7 +124,7 @@ bool FPedroDirectZeroForwardTest::RunTest(const FString& Parameters)
     static_cast<void>(Parameters);
     TestTrue(TEXT("Zero facing vector fails closed"),
         PedroDirectObservation::CheckGeometry(
-            Eye, FVector::ZeroVector, FVector(100, 0, 0), Range, HalfAngle) ==
+            TestEyeLocation, FVector::ZeroVector, FVector(100, 0, 0), Range, HalfAngle) ==
             EPedroDirectObservationStatus::InvalidGeometry);
     return true;
 }
