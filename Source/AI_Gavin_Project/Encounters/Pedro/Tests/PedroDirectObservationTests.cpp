@@ -9,13 +9,13 @@ namespace
 constexpr float Range = 1000.0f;
 constexpr float HalfAngle = 60.0f;
 const FVector Eye(0.0, 0.0, 0.0);
-const FVector Forward(1.0, 0.0, 0.0);
+const FVector TestForwardDirection(1.0, 0.0, 0.0);
 
 EPedroDirectObservationStatus Check(const FVector& Position,
     float MaxRange = Range, float HalfFov = HalfAngle)
 {
     return PedroDirectObservation::CheckGeometry(
-        Eye, Forward, Position, MaxRange, HalfFov);
+        Eye, TestForwardDirection, Position, MaxRange, HalfFov);
 }
 }
 
