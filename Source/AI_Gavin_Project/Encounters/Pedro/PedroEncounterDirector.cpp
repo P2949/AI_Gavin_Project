@@ -1,6 +1,7 @@
 #include "Encounters/Pedro/PedroEncounterDirector.h"
 
 #include "Encounters/Pedro/PedroActivePresentation.h"
+#include "Encounters/Pedro/PedroDirectObservation.h"
 #include "Encounters/Pedro/PedroObservationSourceComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -249,6 +250,40 @@ EDataValidationResult APedroEncounterDirector::IsDataValid(
             Result, EDataValidationResult::Invalid);
     }
 
+    // Direct sightline acquisition is incompatible with the old
+    // prototype assumption. Reject ambiguous configurations in the Editor.
+    if (bUseDirectObservationAcquisition && bUsePrototypeAssumedAcquisition)
+    {
+        Context.AddError(FText::FromString(TEXT(
+            "Pedro direct sight and assumed awareness cannot both be enabled.")));
+        Result = CombineDataValidationResults(Result, EDataValidationResult::Invalid);
+    }
+    if (bUseDirectObservationAcquisition)
+    {
+        if (!IsValid(DirectObservationActor))
+        {
+            Context.AddError(FText::FromString(TEXT(
+                "Direct observation requires a placed observer actor/TargetPoint.")));
+            Result = CombineDataValidationResults(Result, EDataValidationResult::Invalid);
+        }
+        else if (GetWorld() && DirectObservationActor->GetWorld() != GetWorld())
+        {
+            Context.AddError(FText::FromString(TEXT(
+                "Direct observer actor must belong to the Director's world.")));
+            Result = CombineDataValidationResults(Result, EDataValidationResult::Invalid);
+        }
+        if (!FMath::IsFinite(DirectObservationMaxDistance) ||
+            DirectObservationMaxDistance <= 0.0f ||
+            !FMath::IsFinite(DirectObservationViewHalfAngleDegrees) ||
+            DirectObservationViewHalfAngleDegrees < 0.0f ||
+            DirectObservationViewHalfAngleDegrees > 180.0f)
+        {
+            Context.AddError(FText::FromString(TEXT(
+                "Pedro direct observation distance or view angle is invalid.")));
+            Result = CombineDataValidationResults(Result, EDataValidationResult::Invalid);
+        }
+    }
+
     return Result;
 }
 
@@ -406,29 +441,72 @@ void APedroEncounterDirector::HandleOpportunityExposed(FName OpportunityId)
 void APedroEncounterDirector::HandleWorldEventProduced(
     const FPedroBehaviourEvent& Event)
 {
-    if (bHasPresentedOutcome || !bUsePrototypeAssumedAcquisition)
+    if (bHasPresentedOutcome)
     {
         return;
     }
 
-    // This is NOT real perception or a witness claim. The temporary policy
-    // assumes awareness only to exercise the observation-to-score pipeline.
+    // Exactly one acquisition policy is allowed. Both disabled = no knowledge;
+    // both enabled = invalid configuration and NO knowledge (fail closed).
+    if (bUsePrototypeAssumedAcquisition == bUseDirectObservationAcquisition)
+    {
+        if (bUsePrototypeAssumedAcquisition)
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("PEDRO_DIRECT blocked=ConflictingAcquisitionPolicies"));
+        }
+        return;
+    }
+
+    EPedroKnowledgeSource Provenance = EPedroKnowledgeSource::PrototypeAssumed;
+    if (bUseDirectObservationAcquisition)
+    {
+        const EPedroDirectObservationStatus Sight =
+            PedroDirectObservation::Evaluate(GetWorld(), DirectObservationActor,
+                Event, DirectObservationMaxDistance,
+                DirectObservationViewHalfAngleDegrees);
+        UE_LOG(LogTemp, Display,
+            TEXT("PEDRO_DIRECT status=%s kind=%d subject=%s opportunity=%s "
+                 "actualLOS=checked"),
+            PedroDirectObservation::StatusName(Sight),
+            static_cast<int32>(Event.Kind),
+            *Event.SubjectId.ToString(), *Event.OpportunityId.ToString());
+        if (Sight != EPedroDirectObservationStatus::Visible)
+        {
+            return;
+        }
+        Provenance = EPedroKnowledgeSource::DirectObservation;
+    }
+
     FPedroEvidenceRecord Evidence;
     Evidence.Event = Event;
-    Evidence.KnowledgeSource = EPedroKnowledgeSource::PrototypeAssumed;
+    Evidence.KnowledgeSource = Provenance;
     Evidence.AcquiredAtWorldTimeSeconds = GetWorld()
         ? GetWorld()->GetTimeSeconds()
         : Event.WorldTimeSeconds;
 
     if (ObservationState.RecordEvidence(Evidence))
     {
-        UE_LOG(LogTemp, Log,
-            TEXT("Pedro PROTOTYPE-ASSUMED evidence (not LOS): kind=%d "
-                 "subject=%s opportunity=%s total=%d"),
-            static_cast<int32>(Event.Kind),
-            *Event.SubjectId.ToString(),
-            *Event.OpportunityId.ToString(),
-            ObservationState.GetEvidenceCount());
+        if (Evidence.KnowledgeSource == EPedroKnowledgeSource::DirectObservation)
+        {
+            UE_LOG(LogTemp, Display,
+                TEXT("PEDRO_DIRECT acquired=yes kind=%d subject=%s "
+                     "opportunity=%s total=%d provenance=DirectObservation"),
+                static_cast<int32>(Event.Kind), *Event.SubjectId.ToString(),
+                *Event.OpportunityId.ToString(),
+                ObservationState.GetEvidenceCount());
+        }
+        else
+        {
+            // Intentionally unchanged legacy log contract for B2b-3a/b tests.
+            UE_LOG(LogTemp, Log,
+                TEXT("Pedro PROTOTYPE-ASSUMED evidence (not LOS): kind=%d "
+                     "subject=%s opportunity=%s total=%d"),
+                static_cast<int32>(Event.Kind),
+                *Event.SubjectId.ToString(),
+                *Event.OpportunityId.ToString(),
+                ObservationState.GetEvidenceCount());
+        }
 
         // Track only explicitly configured core/bonus opportunities.
         // This threshold is informational until the final classification
@@ -565,7 +643,7 @@ void APedroEncounterDirector::EvaluateShadowCompletionGate()
     UE_LOG(LogTemp, Display,
         TEXT("PEDRO_SHADOW status=%s sampledCore=%d totalCore=%d "
              "requiredCore=%d sampledBonus=%d acquired=%d ready=%s "
-             "candidate=%s readOnly=yes actualLOS=no"),
+             "candidate=%s readOnly=yes actualLOS=%s"),
         PedroShadowStatusName(NewDecision.Status),
         NewDecision.SampledCoreCount,
         NewDecision.CoreCount,
@@ -573,7 +651,9 @@ void APedroEncounterDirector::EvaluateShadowCompletionGate()
         NewDecision.SampledBonusCount,
         NewDecision.AcquiredEvidenceCount,
         NewDecision.CanConclude() ? TEXT("yes") : TEXT("no"),
-        Candidate);
+        Candidate,
+        bUseDirectObservationAcquisition && !bUsePrototypeAssumedAcquisition
+            ? TEXT("checked") : TEXT("no"));
 }
 
 void APedroEncounterDirector::QueueActiveCompletionEvaluation()
@@ -694,9 +774,11 @@ void APedroEncounterDirector::EvaluateActiveCompletion()
 
     UE_LOG(LogTemp, Display,
         TEXT("PEDRO_OUTCOME policy=EvidenceDriven interpretation=%s "
-             "sampledCore=%d requiredCore=%d resolved=yes actualLOS=no"),
+             "sampledCore=%d requiredCore=%d resolved=yes actualLOS=%s"),
         PedroShadowInterpretationName(Plan.Interpretation),
-        Decision.SampledCoreCount, Decision.RequiredCoreSamples);
+        Decision.SampledCoreCount, Decision.RequiredCoreSamples,
+        bUseDirectObservationAcquisition && !bUsePrototypeAssumedAcquisition
+            ? TEXT("checked") : TEXT("no"));
 }
 
 void APedroEncounterDirector::EvaluatePrototypeOutcome()

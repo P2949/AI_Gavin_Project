@@ -63,6 +63,33 @@ public:
     bool bUsePrototypeAssumedAcquisition = false;
 
     /**
+     * B2b-4a: Opt-in, line-traced view-cone acquisition of confirmed events.
+     * Never enable together with prototype-assumed acquisition: both ON
+     * deliberately fails closed instead of silently switching provenance.
+     * Existing map instances keep this false; no asset migration required.
+     */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        Category = "Pedro|Observation|Direct Line Of Sight")
+    bool bUseDirectObservationAcquisition = false;
+
+    /** A placed actor/TargetPoint representing the observer's eye and facing. */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        Category = "Pedro|Observation|Direct Line Of Sight")
+    TObjectPtr<AActor> DirectObservationActor;
+
+    /** Maximum eye-to-event distance, in Unreal centimeters. */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        Category = "Pedro|Observation|Direct Line Of Sight",
+        meta=(ClampMin="1.0", UIMin="1.0"))
+    float DirectObservationMaxDistance = 1500.0f;
+
+    /** Angle from the actor's forward direction (half of total field of view). */
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly,
+        Category = "Pedro|Observation|Direct Line Of Sight",
+        meta=(ClampMin="0.0", ClampMax="180.0", UIMin="0.0", UIMax="180.0"))
+    float DirectObservationViewHalfAngleDegrees = 75.0f;
+
+    /**
      * Authored core/bonus choices for this Pedro level instance.
      * IDs must match the ObservationSource component OpportunityIds.
      * An unconfigured source can still produce evidence, but won't count
