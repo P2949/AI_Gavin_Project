@@ -8,17 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-BASELINE = 'afb94d071d359ad01ff10967a13f65b3bdaa0c2d'
-BRANCH = 'feature/pedro-observer-awareness'
-SRC = 'Source/AI_Gavin_Project/Encounters/Pedro/'
-TOOLS = 'Tools/PedroValidation/'
-EXPECTED = frozenset([
-    SRC+'PedroAwarenessState.h', SRC+'PedroObserverAIController.h',
-    SRC+'PedroObserverAIController.cpp', SRC+'Tests/PedroAwarenessStateTests.cpp',
-    SRC+'Tests/PedroObserverAIControllerTests.cpp', SRC+'Tests/PedroAwarenessWorldTests.cpp',
-    TOOLS+'b2b6a_audit.py', TOOLS+'b2b6a_run.sh', TOOLS+'verify_awareness_report.py',
-    TOOLS+'tests/test_awareness_report.py', 'docs/encounters/pedro-observer-awareness.md',
-])
+BASELINE = 'b740d47ceda2564a7cd0fb817079bfa8d6e4d5f8'  # merged awareness regression baseline
 
 def require(condition, message):
     if not condition:
@@ -30,28 +20,17 @@ def git(*args):
 def records(output):
     return [os.fsdecode(item) for item in output.split(b'\0') if item]
 
-def audit(clean=False):
-    require(git('branch','--show-current').decode().strip() == BRANCH, 'wrong branch')
-    require(git('rev-parse','HEAD').decode().strip() == BASELINE,
-            'expected exact pre-implementation HEAD; do not automatically rebase')
-    changes = records(git('status','--porcelain=v1','-z','--untracked-files=all'))
-    if clean:
-        require(not changes, 'installation requires clean baseline')
-        require(all(not Path(p).exists() and not Path(p).is_symlink() for p in EXPECTED), 'destination already exists')
-        print('PASS: clean exact baseline, all destinations absent')
-        return
-    actual = {}
+def audit():
+    # Regression is reusable on a clean or fully staged descendant. The
+    # caller reviews the staged scope; this guard protects the tested bytes.
+    git('merge-base', '--is-ancestor', BASELINE, 'HEAD')
+    changes = records(git('status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'))
     for entry in changes:
-        status, path = entry[:2], entry[3:]
-        require(status in ('??','A ','AM'), f'unexpected status: {entry}')
-        require(path not in actual, f'duplicate path: {path}')
-        actual[path] = status
-    require(set(actual) == EXPECTED,
-            f'changed paths mismatch: extra={sorted(set(actual)-EXPECTED)} missing={sorted(EXPECTED-set(actual))}')
-    for path in sorted(EXPECTED):
-        require(Path(path).is_file() and not Path(path).is_symlink(), f'not an ordinary file: {path}')
-        print(f'PASS: {actual[path]} {path}')
-    print('PASS: exactly 11 new milestone files; no baseline file changes')
+        require(entry[:2] in ('A ', 'M ', 'D ', 'T '),
+                f'Unstaged, untracked or unresolved change: {entry}')
+    git('diff', '--cached', '--check')
+    print(f'PASS: merged awareness baseline; {len(changes)} fully staged paths, no unstaged/untracked changes')
+
 
 def snapshot(directory, label):
     directory=Path(directory)
@@ -132,14 +111,13 @@ def engine_inspection(engine):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--clean',action='store_true')
     p.add_argument('--engine-only',type=Path)
     p.add_argument('--snapshot',nargs=2,metavar=('DIRECTORY','LABEL'))
     a=p.parse_args()
     try:
         if a.engine_only: engine_inspection(a.engine_only)
         elif a.snapshot: snapshot(*a.snapshot)
-        else: audit(a.clean)
+        else: audit()
         return 0
     except (ValueError,OSError,subprocess.CalledProcessError,KeyError) as e:
         print(f'FAIL: {e}',file=sys.stderr)
