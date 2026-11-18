@@ -3,6 +3,17 @@
 #include "CoreMinimal.h"
 #include "CollisionQueryParams.h"
 #include "Components/BoxComponent.h"
+#include "Components/BrushComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "NavigationSystem.h"
+#include "NavigationData.h"
+#include "NavMesh/NavMeshBoundsVolume.h"
+#include "NavMesh/RecastNavMesh.h"
+#include "NavMesh/NavMeshPath.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "Components/SceneComponent.h"
 #include "Containers/Ticker.h"
 #include "Engine/Engine.h"
@@ -65,7 +76,7 @@ struct FRun
     int32 Index = 0, Passed = 0, StableFrames = 0;
     int32 InitialProgress = 0;
     double StartTime = 0, StableTime = 0;
-    bool bSetup = false, bIntegration = false, bBegan = false, bAttention = false;
+    bool bSetup = false, bIntegration = false, bBegan = false, bAttention = false, bNavigation = false, bNavProbe = false;
 };
 FRun Run;
 
@@ -804,14 +815,528 @@ void MakeAttentionIntegrationSteps()
     },FinalPresentation,0.5);
 }
 
-int32 ExpectedCases() { return Run.bIntegration?6:(Run.bAttention?24:25); }
-const TCHAR* SuiteName() { return Run.bAttention?AttentionSuite():(Run.bIntegration?TEXT("integration"):TEXT("world")); }
+// Navigation fixture is opt-in and never alters the legacy frozen fixtures.
+using NavMode=EPedroNavigationMode;
+using NavReason=EPedroNavigationReason;
+struct FNavigationFixture
+{
+    TArray<TWeakObjectPtr<AActor>> Geometry;
+    TWeakObjectPtr<ANavMeshBoundsVolume> Bounds;
+    TWeakObjectPtr<AActor> PhysicalBlocker;
+    FVector Previous=FVector::ZeroVector,Start=FVector::ZeroVector,EyeRelative=FVector::ZeroVector,OtherPrevious=FVector::ZeroVector;
+    FRotator EyeRelativeRotation=FRotator::ZeroRotator;
+    TWeakObjectPtr<APedroObserverCharacter> OtherActor;
+    FVector FixedGoal=FVector::ZeroVector,FixedSighting=FVector::ZeroVector;
+    double PrevTime=0,PrevYaw=0,Travel=0,YawTravel=0,MaxSpeed=0,MaxSide=0,FixedTime=0;
+    double OriginalSpeed=0,OriginalAccel=0,OriginalBrake=0;
+    uint32 Submissions=0,FixedRequest=0;
+    bool bOriginalAcceleration=false,bCapability=false,bSavedReady=false;
+    bool bSavedPair=false;
+    FVector SavedSecondPlayer=FVector::ZeroVector;
+    FVector SavedRelocationRoot=FVector::ZeroVector;
+    uint32 SavedRelocationSubmissions=0;
+    FVector SavedRestorePlayer=FVector::ZeroVector;
+    double SavedRestoreSightingTime=0;
+    uint32 SavedRestoreSubmissions=0;
+};
+FNavigationFixture NavTest;
+constexpr double NavGroundOffset=88;
+const TCHAR* NavModeName(NavMode M)
+{
+    switch(M){case NavMode::Disabled:return TEXT("Disabled");case NavMode::Idle:return TEXT("Idle");case NavMode::FollowObserved:return TEXT("FollowObserved");case NavMode::ContinueLastKnown:return TEXT("ContinueLastKnown");case NavMode::Blocked:return TEXT("Blocked");}
+    return TEXT("Invalid");
+}
+const TCHAR* NavSuite(){return Run.bNavProbe?TEXT("navigation-probe"):(Run.bIntegration?TEXT("navigation-integration"):TEXT("navigation"));}
+FVector NavRoot(){return Run.Observer.IsValid()?Run.Observer->GetActorLocation():FVector::ZeroVector;}
+FVector NavVelocity(){return Run.Observer.IsValid()?Run.Observer->GetCharacterMovement()->Velocity:FVector::ZeroVector;}
+NavMode NavigationMode(){return Run.Controller.IsValid()?Run.Controller->GetNavigationDecision().Mode:NavMode::Disabled;}
+bool NavActive(){return Run.Controller.IsValid()&&Run.Controller->GetNavigationIntent().bActive&&Run.Controller->GetPedroMoveId().IsValid()&&Run.Controller->HasValidPedroPath();}
+bool NavStopped(){return !NavActive()&&NavVelocity().Size2D()<1;}
+uint32 NavSubmissions(){return Run.Controller.IsValid()?Run.Controller->GetPedroMoveSubmissions():0;}
+bool NavSeen(){return Visible();}
+bool NavFollowing(){return NavSeen()&&NavActive()&&NavigationMode()==NavMode::FollowObserved;}
+bool NavArrived(){return NavSeen()&&NavStopped()&&NavigationMode()==NavMode::Idle&&FVector::Dist2D(NavRoot(),State().LastKnownPlayerLocation)<=505;}
+bool NavBlocked(){return NavSeen()&&NavigationMode()==NavMode::Blocked&&NavStopped();}
+UNavigationSystemV1* NavSystem(){return FNavigationSystem::GetCurrent<UNavigationSystemV1>(Run.World.Get());}
+const ANavigationData* NavData()
+{
+    auto* NS=NavSystem();auto* M=Run.Observer.IsValid()?Run.Observer->GetCharacterMovement():nullptr;
+    return NS&&M?NS->GetNavDataForProps(M->GetNavAgentPropertiesRef(),M->GetFeetLocation(),FVector::ZeroVector):nullptr;
+}
+bool NavProject(const FVector& At,FNavLocation& Out,const FVector& Extent=FVector(75,75,180))
+{
+    return NavData()&&NavSystem()->ProjectPointToNavigation(At,Out,Extent,NavData());
+}
+FNavPathSharedPtr NavQuery(const FVector& From,const FVector& To)
+{
+    const auto* Data=NavData();if(!Data)return {};
+    FPathFindingQuery Q(Run.Controller.Get(),*Data,From,To);Q.SetAllowPartialPaths(false);
+    Q.SetNavAgentProperties(Run.Observer->GetCharacterMovement()->GetNavAgentPropertiesRef());
+    const auto R=NavSystem()->FindPathSync(Q);
+    if(!R.IsSuccessful()||!R.Path.IsValid()||!R.Path->IsValid()||R.Path->IsPartial())return {};
+    return R.Path;
+}
+AStaticMeshActor* NavBox(const FVector& Center,const FVector& Size,bool bAffectNav=true)
+{
+    auto* Cube=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube"));
+    auto* A=SpawnAt<AStaticMeshActor>(Center);if(!IsValid(A)||!IsValid(Cube))return nullptr;
+    auto* C=A->GetStaticMeshComponent();C->SetMobility(EComponentMobility::Movable);
+    C->SetCanEverAffectNavigation(false);C->SetStaticMesh(Cube);C->SetCollisionProfileName(TEXT("BlockAll"));C->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    A->SetActorScale3D(Size/100.0);C->SetCanEverAffectNavigation(bAffectNav);
+    NavTest.Geometry.Add(A);return A;
+}
+bool NavBounds(const FVector& Center,const FVector& Extent)
+{
+    auto* NS=NavSystem();if(!NS)return false;
+    auto* V=SpawnAt<ANavMeshBoundsVolume>(Center);if(!IsValid(V)||!V->GetBrushComponent())return false;
+    // A spawned brush has no authored model. Use the runtime bounds explicitly;
+    // real projection/path tests below are mandatory, not a bounds-only pass.
+    V->GetBrushComponent()->Bounds=FBoxSphereBounds(FBox(Center-Extent,Center+Extent));
+    NS->OnNavigationBoundsUpdated(V);NavTest.Bounds=V;
+    UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_FIXTURE transientBounds center=%s extent=%s"),*VectorString(Center),*VectorString(Extent));
+    NS->Build();
+    return true;
+}
+bool EnableLocomotion(APedroObserverCharacter* O)
+{
+    if(!IsValid(O))return false;
+    auto* M=O->GetCharacterMovement();O->GetCapsuleComponent()->SetCanEverAffectNavigation(false);
+    M->SetComponentTickEnabled(true);M->StopMovementImmediately();M->SetMovementMode(MOVE_Walking);
+    return M->IsComponentTickEnabled()&&M->IsMovingOnGround();
+}
+APedroObserverAIController* AttachMovable(APedroObserverCharacter* O)
+{
+    if(!IsValid(O))return nullptr;
+    if(auto* Existing=O->GetController();IsValid(Existing)){Existing->UnPossess();Existing->Destroy();}
+    auto* C=SpawnAt<APedroObserverAIController>(O->GetActorLocation());if(!IsValid(C))return nullptr;
+    C->Possess(O);if(C->GetPawn()!=O||!EnableLocomotion(O)){C->Destroy();return nullptr;}return C;
+}
+bool NavEnable(bool Enabled=true)
+{
+    if(!Run.Controller.IsValid())return false;
+    Run.Controller->SetNavigationEnabled(Enabled);
+    return Run.Controller->IsNavigationRunning()==Enabled;
+}
+bool NavReset(const FVector& ObserverOffset,const FVector& PlayerOffset,bool bEnable=true,bool bAttention=false,double Yaw=0)
+{
+    DestroyController(Run.Controller);
+    if(!Run.Observer.IsValid()||!Run.Player.IsValid()||!WallOff())return false;
+    Run.Observer->GetObserverEye()->SetRelativeLocationAndRotation(FVector(0,0,64),FRotator::ZeroRotator);
+    if(!Place(Run.Observer.Get(),ArenaOrigin+ObserverOffset,FRotator(0,Yaw,0))||!MovePlayer(PlayerOffset))return false;
+    Run.Controller=AttachMovable(Run.Observer.Get());if(!Run.Controller.IsValid())return false;
+    Run.Controller->SetAttentionEnabled(bAttention);
+    return !bEnable||NavEnable();
+}
+bool PrepareNavigationArena()
+{
+    if(auto* P=Cast<ACharacter>(Run.Player.Get()))P->GetCapsuleComponent()->SetCanEverAffectNavigation(false);
+    if(!NavBox(ArenaOrigin+FVector(0,0,-NavGroundOffset-25),FVector(3000,3000,50))||
+       !NavBox(ArenaOrigin+FVector(2100,0,-NavGroundOffset-25),FVector(600,800,50))||
+       !NavBox(ArenaOrigin+FVector(-2400,0,-NavGroundOffset-25),FVector(600,800,50),false)||
+       !NavBox(ArenaOrigin+FVector(250,900,-NavGroundOffset+35),FVector(80,440,70)))return false;
+    if(!NavReset(FVector::ZeroVector,FVector(900,0,0),false))return false;
+    if(!NavBounds(ArenaOrigin+FVector(400,0,0),FVector(2300,1750,350)))return false;
+    Run.Box->SetCanEverAffectNavigation(false);
+    return true;
+}
+bool NavCapability()
+{
+    const auto* Data=Cast<ARecastNavMesh>(NavData());if(!IsValid(Data)||Data->GetRuntimeGenerationMode()!=ERuntimeGenerationType::Dynamic)return false;
+    FNavLocation Start,End,Island;
+    if(!NavProject(ArenaOrigin,Start)||!NavProject(ArenaOrigin+FVector(700,0,0),End)||!NavProject(ArenaOrigin+FVector(2100,0,0),Island))return false;
+    const auto Connected=NavQuery(Start.Location,End.Location);
+    if(!Connected.IsValid()||Connected->GetLength()<600||NavQuery(Start.Location,Island.Location).IsValid())return false;
+    if(!NavTest.bCapability)UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=CAPABILITY dynamic=yes connected=yes disconnected=yes start=%s end=%s island=%s length=%.3f"),*VectorString(Start.Location),*VectorString(End.Location),*VectorString(Island.Location),Connected->GetLength());
+    NavTest.bCapability=true;return true;
+}
+bool NavRemember()
+{
+    if(!NavFollowing()||!FreezeMemory())return false;
+    NavTest.FixedGoal=Run.Controller->GetPedroMoveGoal();NavTest.FixedRequest=Run.Controller->GetPedroMoveId().GetID();
+    NavTest.FixedSighting=Run.Controller->GetNavigationIntent().Sighting;NavTest.FixedTime=Run.Controller->GetNavigationIntent().SightingTime;
+    NavTest.Submissions=NavSubmissions();return true;
+}
+bool NavFrozenRoute()
+{
+    if(!MemoryUnchanged()||NavSubmissions()!=NavTest.Submissions)return false;
+    return !NavActive()||(Run.Controller->GetPedroMoveId().GetID()==NavTest.FixedRequest&&Run.Controller->GetPedroMoveGoal().Equals(NavTest.FixedGoal,.01)&&
+        Run.Controller->GetNavigationIntent().Sighting.Equals(NavTest.FixedSighting,.01)&&Run.Controller->GetNavigationIntent().SightingTime==NavTest.FixedTime);
+}
+bool NavCover(){return WallAt(ArenaOrigin+FVector(900,0,0),FVector(35,1000,500));}
+void CaptureNavPose()
+{
+    NavTest.Start=NavTest.Previous=NavRoot();NavTest.PrevTime=Run.World->GetTimeSeconds();NavTest.PrevYaw=BodyYaw();
+    NavTest.Travel=NavTest.YawTravel=NavTest.MaxSpeed=NavTest.MaxSide=0;
+    NavTest.EyeRelative=Run.Observer->GetObserverEye()->GetRelativeLocation();NavTest.EyeRelativeRotation=Run.Observer->GetObserverEye()->GetRelativeRotation();
+    NavTest.OtherActor=Run.SecondObserver;NavTest.OtherPrevious=Run.SecondObserver.IsValid()?Run.SecondObserver->GetActorLocation():FVector::ZeroVector;
+}
+void LogNavSample(const TCHAR* Kind,const FStep& Step,double Dt=0)
+{
+    const auto* C=Run.Controller.Get();const auto& A=State();const auto* M=Run.Observer.IsValid()?Run.Observer->GetCharacterMovement():nullptr;
+    const auto* Intent=C?&C->GetNavigationIntent():nullptr;
+    const FVector Actual=Run.Player.IsValid()?Run.Player->GetActorLocation():FVector::ZeroVector;
+    const FString Owner=GetNameSafe(A.ObservedPlayer.Get()),Player=GetNameSafe(Run.Player.Get());
+    const auto Rotation=Run.Observer.IsValid()?Run.Observer->GetActorRotation():FRotator::ZeroRotator;
+    FVector Eye=FVector::ZeroVector;FRotator Facing=FRotator::ZeroRotator;if(Run.Observer.IsValid())Run.Observer->GetActorEyesViewPoint(Eye,Facing);
+    const FVector Rel=Run.Observer.IsValid()?Run.Observer->GetObserverEye()->GetRelativeLocation():FVector::ZeroVector;
+    const FRotator RelRot=Run.Observer.IsValid()?Run.Observer->GetObserverEye()->GetRelativeRotation():FRotator::ZeroRotator;
+    const auto* Other=Run.SecondController.Get();
+    UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=%s case=%s step=%s now=%.6f dt=%.6f root=%s start=%s velocity=%s body=%.6f,%.6f,%.6f eye=%s forward=%s rel=%s relRot=%.6f,%.6f,%.6f travel=%.3f yawTravel=%.3f maxSide=%.3f mode=%s reason=%d running=%s attention=%d active=%s id=%u valid=%s goal=%s sighting=%s sightTime=%.6f planTime=%.6f length=%.3f submissions=%u controller=%s speedLimit=%.3f accel=%.3f brake=%.3f accelPaths=%s awareness=%s has=%s known=%s actual=%s time=%.6f target=%s player=%s grounded=%s evidence=%d sampled=%d emitted=%s acquired=%s final=%s progress=%d otherId=%u otherRoot=%s"),
+        Kind,Step.Case.IsEmpty()?TEXT("-"):*Step.Case,*Step.Name,Run.World->GetTimeSeconds(),Dt,*VectorString(NavRoot()),*VectorString(NavTest.Start),*VectorString(NavVelocity()),Rotation.Pitch,Rotation.Yaw,Rotation.Roll,
+        *VectorString(Eye),*VectorString(Facing.Vector()),*VectorString(Rel),RelRot.Pitch,RelRot.Yaw,RelRot.Roll,NavTest.Travel,NavTest.YawTravel,NavTest.MaxSide,
+        NavModeName(NavigationMode()),C?int32(C->GetNavigationDecision().Reason):0,Yes(C&&C->IsNavigationRunning()),C?int32(C->GetAttentionDecision().Mode):0,
+        Yes(Intent&&Intent->bActive),C&&C->GetPedroMoveId().IsValid()?C->GetPedroMoveId().GetID():0,Yes(C&&C->HasValidPedroPath()),*VectorString(C?C->GetPedroMoveGoal():FVector::ZeroVector),
+        *VectorString(Intent?Intent->Sighting:FVector::ZeroVector),Intent?Intent->SightingTime:0,Intent?Intent->LastPlan:-1,C?C->GetPedroPathLength():0,NavSubmissions(),*GetNameSafe(C),M?M->MaxWalkSpeed:0,M?M->MaxAcceleration:0,M?M->BrakingDecelerationWalking:0,Yes(M&&M->GetNavMovementProperties().bUseAccelerationForPaths),StatusName(A.Status),Yes(A.bHasLastKnownPlayerLocation),
+        *VectorString(A.LastKnownPlayerLocation),*VectorString(Actual),A.LastSuccessfulSightingTime,*Owner,*Player,Yes(M&&M->IsMovingOnGround()),EvidenceCount(),SampledCount(),*Ids(Run.Emitted),*EvidenceIds(),Yes(Finalized()),Progress()?Progress()->GetResolvedEncounterCount():-1,
+        Other&&Other->GetPedroMoveId().IsValid()?Other->GetPedroMoveId().GetID():0,*VectorString(Run.SecondObserver.IsValid()?Run.SecondObserver->GetActorLocation():FVector::ZeroVector));
+}
+bool GuardNav(const FStep& Step,bool bLog=true)
+{
+    if(!Run.Observer.IsValid())return false;
+    const double Now=Run.World->GetTimeSeconds(),Dt=Now-NavTest.PrevTime;
+    if(Dt<0)return false;
+    if(Dt==0)return true;
+    const auto Root=NavRoot();const double Distance=FVector::Dist2D(Root,NavTest.Previous);
+    const double YawDelta=FMath::Abs(FMath::FindDeltaAngleDegrees(NavTest.PrevYaw,BodyYaw()));
+    const auto R=Run.Observer->GetActorRotation();
+    if(Root.ContainsNaN()||NavVelocity().ContainsNaN()||Distance>190*Dt+.5||NavVelocity().Size2D()>185||YawDelta>90*FMath::Min(Dt,.1)+.8||
+        FMath::Abs(R.Pitch)>.5||FMath::Abs(R.Roll)>.5||FMath::Abs(Root.Z-NavTest.Start.Z)>12)return false;
+    if(!Run.Observer->GetObserverEye()->GetRelativeLocation().Equals(NavTest.EyeRelative,.01)||!Run.Observer->GetObserverEye()->GetRelativeRotation().Equals(NavTest.EyeRelativeRotation,.01))return false;
+    if(NavTest.OtherActor.IsValid())
+    {
+        if(NavTest.OtherActor!=Run.SecondObserver||FVector::Dist2D(NavTest.OtherPrevious,Run.SecondObserver->GetActorLocation())>190*Dt+.5||Run.SecondObserver->GetVelocity().Size2D()>185)return false;
+        NavTest.OtherPrevious=Run.SecondObserver->GetActorLocation();
+    }
+    if(Step.Case==TEXT("N12"))
+    {
+        const FVector Relative=Root-ArenaOrigin;const double X=FMath::Clamp(Relative.X,210.,290.),Y=FMath::Clamp(Relative.Y,680.,1120.);
+        if(FVector::Dist2D(Relative,FVector(X,Y,Relative.Z))<Run.Observer->GetCapsuleComponent()->GetScaledCapsuleRadius()-2)return false;
+    }
+    if(Run.Controller.IsValid()&&Run.Controller->GetNavigationIntent().bActive&&!NavActive())return false;
+    if(NavActive()&&(!Run.Controller->IsNavigationRunning()||Run.Controller->GetPathFollowingComponent()->GetCurrentRequestId().GetID()!=Run.Controller->GetPedroMoveId().GetID()||
+        Run.Controller->GetPedroPathLength()>2200.1||!Run.Observer->GetCharacterMovement()->IsMovingOnGround()))return false;
+    if(!Run.Controller.IsValid()||!Run.Controller->IsAttentionRunning())if(YawDelta>.1)return false;
+    NavTest.Travel+=Distance;NavTest.YawTravel+=YawDelta;NavTest.MaxSpeed=FMath::Max(NavTest.MaxSpeed,NavVelocity().Size2D());
+    NavTest.MaxSide=FMath::Max(NavTest.MaxSide,FMath::Abs(Root.Y-NavTest.Start.Y));
+    NavTest.Previous=Root;NavTest.PrevTime=Now;NavTest.PrevYaw=BodyYaw();if(bLog)LogNavSample(TEXT("FRAME"),Step,Dt);
+    return true;
+}
+void MakeNavigationSteps()
+{
+    Add(TEXT("N01"),TEXT("DisabledWithNavmesh"),PrepareNavigationArena,[]{return NavCapability()&&NavSeen()&&NavStopped()&&NavigationMode()==NavMode::Disabled&&NavTest.Travel<2;},.5);
+    if(!Run.bNavProbe)
+    {
+        Add(TEXT("N02"),TEXT("InitiallyHidden"),[]{return NavReset(FVector::ZeroVector,FVector(-900,0,0));},[]{return EmptyAwareness()&&NavStopped()&&NavSubmissions()==0;},.6);
+        Add(TEXT("N03"),TEXT("WithinBand"),[]{return NavReset(FVector::ZeroVector,FVector(450,0,0));},[]{return NavSeen()&&NavStopped()&&NavSubmissions()==0;},.5);
+    }
+    Add(TEXT("N04"),TEXT("NativeFollow"),[]{return NavReset(FVector::ZeroVector,FVector(1200,0,0));},[]{return NavFollowing()&&NavVelocity().Size2D()>50&&NavTest.Travel>80;},.05);
+    if(Run.bNavProbe)return;
+    Add(TEXT("N05"),TEXT("StandoffArrival"),Noop,[]{return NavArrived()&&FVector::Dist2D(NavRoot(),State().LastKnownPlayerLocation)>=400;},.4);
+    Add(TEXT("N06"),TEXT("HysteresisIdle"),[]{NavTest.Submissions=NavSubmissions();return Place(Run.Player.Get(),NavRoot()+FVector(575,0,0));},[]{return NavSeen()&&NavStopped()&&NavSubmissions()==NavTest.Submissions&&NavTest.Travel<2;},.6);
+    Add(TEXT(""),TEXT("ApproachWhileMoving"),[]{return NavReset(FVector::ZeroVector,FVector(1200,0,0));},[]{return NavFollowing()&&NavTest.Travel>70;},.05);
+    Add(TEXT("N07"),TEXT("PlayerApproaches"),[]{return Place(Run.Player.Get(),NavRoot()+FVector(350,0,0));},[]{return NavSeen()&&NavStopped()&&NavTest.Travel<50;},.3);
+    Add(TEXT("N08"),TEXT("SpeedAndBraking"),[]{return NavReset(FVector::ZeroVector,FVector(1200,0,0));},[]{return NavArrived()&&NavTest.Travel>600&&NavTest.MaxSpeed>150&&NavTest.MaxSpeed<=185;},.4);
+    Add(TEXT(""),TEXT("BeforeReplan"),[]{return NavReset(FVector::ZeroVector,FVector(1300,0,0));},[]{return NavFollowing()&&NavTest.Travel>50;},.05);
+    Add(TEXT("N09"),TEXT("ReplanVisible"),[]{NavTest.FixedGoal=Run.Controller->GetPedroMoveGoal();NavTest.Submissions=NavSubmissions();return MovePlayer(FVector(1300,240,0));},[]{return NavFollowing()&&NavSubmissions()==NavTest.Submissions+1&&FVector::Dist2D(NavTest.FixedGoal,Run.Controller->GetPedroMoveGoal())>80;},.05);
+    Add(TEXT("N10"),TEXT("SmallMovementRetained"),[]{NavTest.FixedRequest=Run.Controller->GetPedroMoveId().GetID();NavTest.Submissions=NavSubmissions();return MovePlayer(FVector(1300,275,0));},[]{return NavFollowing()&&NavSeen()&&NavSubmissions()==NavTest.Submissions&&Run.Controller->GetPedroMoveId().GetID()==NavTest.FixedRequest;},.2);
+    Add(TEXT(""),TEXT("RateFirst"),[]{NavTest.Submissions=NavSubmissions();return MovePlayer(FVector(1300,-200,0));},[]{return NavFollowing()&&NavSubmissions()==NavTest.Submissions+1;},0);
+    Add(TEXT(""),TEXT("RateSecond"),[]{return MovePlayer(FVector(1300,200,0));},[]{return NavFollowing()&&NavSubmissions()==NavTest.Submissions+2;},0);
+    Add(TEXT("N11"),TEXT("BoundedReplanning"),[]{return MovePlayer(FVector(1300,-200,0));},[]{return NavFollowing()&&NavSubmissions()==NavTest.Submissions+3;},0);
+    Add(TEXT("N12"),TEXT("NativeDetour"),[]{return NavReset(FVector(0,900,0),FVector(1150,900,0));},[]{return NavArrived()&&NavTest.MaxSide>230&&NavTest.Travel>750;},.3);
+    Add(TEXT("N13"),TEXT("NoNavigableStart"),[]{return NavReset(FVector(-2400,0,0),FVector(-1500,0,0));},[]{return NavBlocked()&&NavSubmissions()==0&&NavTest.Travel<2;},.3);
+    Add(TEXT("N14"),TEXT("OffmeshGoal"),[]{return NavReset(FVector(900,-1150,0),FVector(2000,-1150,0));},[]{return NavSeen()&&(NavBlocked()||(NavActive()&&Run.Controller->HasValidPedroPath()&&Run.Controller->GetPedroMoveGoal().X<ArenaOrigin.X+1500));},.3);
+    Add(TEXT("N15"),TEXT("DisconnectedRoute"),[]{return NavReset(FVector(1100,0,0),FVector(2200,0,0));},[]{return NavBlocked()&&NavSubmissions()==0&&NavTest.Travel<2;},.3);
+    Add(TEXT("N16"),TEXT("PhysicalStall"),[]{if(!NavReset(FVector::ZeroVector,FVector(1300,0,0)))return false;NavTest.PhysicalBlocker=NavBox(ArenaOrigin+FVector(110,0,-NavGroundOffset+35),FVector(50,500,70),false);return NavTest.PhysicalBlocker.IsValid();},[]{return NavBlocked()&&NavSubmissions()>0&&NavRoot().X<ArenaOrigin.X+110;},.1);
+    Add(TEXT("N17"),TEXT("RetryAfterBlockCleared"),[]{if(!NavTest.PhysicalBlocker.IsValid())return false;NavTest.PhysicalBlocker->Destroy();return true;},[]{return NavFollowing()&&NavSubmissions()>1&&NavRoot().X>ArenaOrigin.X+200;},.1);
+    Add(TEXT(""),TEXT("BeforeStationaryLoss"),[]{return NavReset(FVector::ZeroVector,FVector(575,0,0));},[]{return NavSeen()&&NavStopped();},.2);
+    Add(TEXT("N18"),TEXT("StationaryLoss"),[]{return FreezeMemory()&&WallAt(ArenaOrigin+FVector(300,0,0),FVector(35,1000,500));},[]{return Lost()&&NavStopped()&&NavSubmissions()==0;},.4,MemoryUnchanged);
+    Add(TEXT(""),TEXT("BeforeFollowingLoss"),[]{return NavReset(FVector::ZeroVector,FVector(1300,0,0),true,true);},[]{return NavFollowing()&&NavTest.Travel>60;},.05);
+    Add(TEXT("N19"),TEXT("ContinueFixedRoute"),[]{return NavRemember()&&NavCover();},[]{return Lost()&&NavActive()&&NavigationMode()==NavMode::ContinueLastKnown&&NavFrozenRoute()&&NavTest.Travel>30;},.05,NavFrozenRoute);
+    Add(TEXT("N20"),TEXT("HiddenMoveNoRetarget"),[]{return MovePlayer(FVector(1300,350,0))&&PlayerRayHitsWall();},[]{return Lost()&&NavActive()&&NavigationMode()==NavMode::ContinueLastKnown&&NavFrozenRoute()&&NavTest.Travel>15;},.05,NavFrozenRoute);
+    Add(TEXT("N21"),TEXT("ExpiredStops"),Noop,[]{return Lost()&&NavFrozenRoute()&&NavStopped()&&Run.World->GetTimeSeconds()-Run.Frozen.LastSuccessfulSightingTime>=2;},.4,NavFrozenRoute);
+    Add(TEXT("N22"),TEXT("ReacquireNewRoute"),WallOff,[]{return NavFollowing()&&NavSubmissions()>NavTest.Submissions&&State().LastSuccessfulSightingTime>Run.Frozen.LastSuccessfulSightingTime;},.1);
+    Add(TEXT(""),TEXT("BeforeDisable"),[]{if(!NavReset(FVector::ZeroVector,FVector(1300,0,0),false))return false;auto* M=Run.Observer->GetCharacterMovement();NavTest.OriginalSpeed=M->MaxWalkSpeed;NavTest.OriginalAccel=M->MaxAcceleration;NavTest.OriginalBrake=M->BrakingDecelerationWalking;NavTest.bOriginalAcceleration=M->GetNavMovementProperties()->bUseAccelerationForPaths;return NavEnable();},[]{return NavFollowing()&&NavTest.Travel>60;},.05);
+    Add(TEXT(""),TEXT("DisabledStopsAndRestores"),[]{return NavEnable(false);},[]{auto* M=Run.Observer->GetCharacterMovement();return NavStopped()&&NavSeen()&&NavigationMode()==NavMode::Disabled&&NavTest.Travel<2&&M->MaxWalkSpeed==NavTest.OriginalSpeed&&M->MaxAcceleration==NavTest.OriginalAccel&&M->BrakingDecelerationWalking==NavTest.OriginalBrake&&M->GetNavMovementProperties()->bUseAccelerationForPaths==NavTest.bOriginalAcceleration;},.4);
+    Add(TEXT("N23"),TEXT("ReenableFresh"),[]{return NavEnable()&&NavEnable();},[]{return NavFollowing()&&NavTest.Travel>35&&NavSubmissions()==1;},.05);
+    Add(TEXT("N24"),TEXT("PlayerReplacement"),[]{auto* Old=Run.Player.Get();if(!IsValid(Old)||!Old->Destroy())return false;auto* P=SpawnObserver(NavRoot()-FVector(700,0,0),FRotator::ZeroRotator);if(!IsValid(P))return false;Run.PC->Possess(P);Run.Player=P;P->GetCapsuleComponent()->SetCanEverAffectNavigation(false);return Freeze(P);},[]{return EmptyAwareness()&&NavStopped();},.4);
+    Add(TEXT(""),TEXT("BeforeUnpossess"),[]{return NavReset(FVector::ZeroVector,FVector(1300,0,0));},[]{return NavFollowing()&&NavTest.Travel>50;},.05);
+    Add(TEXT(""),TEXT("UnpossessStops"),[]{Run.Controller->UnPossess();return true;},[]{return NavStopped()&&!Run.Controller->IsNavigationRunning()&&!Run.Controller->GetPawn()&&EmptyAwareness();},.3);
+    Add(TEXT(""),TEXT("RepossessMoves"),[]{Run.Controller->Possess(Run.Observer.Get());return Run.Controller->GetPawn()==Run.Observer.Get();},[]{return NavFollowing()&&NavTest.Travel>50;},.05);
+    Add(TEXT("N25"),TEXT("DestroyControllerStops"),[]{return Run.Controller->Destroy();},[]{return !Run.Controller.IsValid()&&!IsValid(Run.Observer->GetController())&&NavStopped()&&NavTest.Travel<2;},.4);
+    Add(TEXT("N26"),TEXT("IndependentRoutes"),[]{if(!NavReset(FVector::ZeroVector,FVector(1300,0,0)))return false;Run.SecondObserver=SpawnObserver(ArenaOrigin+FVector(0,-600,0),FRotator::ZeroRotator);Run.SecondController=AttachMovable(Run.SecondObserver.Get());if(!Run.SecondController.IsValid())return false;Run.SecondController->SetNavigationEnabled(true);return Run.SecondController->IsNavigationRunning();},[]{return NavFollowing()&&NavTest.Travel>70&&Run.SecondController.IsValid()&&Run.SecondController->HasValidPedroPath()&&Run.SecondController->GetPedroMoveId().GetID()!=Run.Controller->GetPedroMoveId().GetID()&&Run.SecondObserver->GetActorLocation().X>ArenaOrigin.X+70;},.05);
+    Add(TEXT("N27"),TEXT("AttentionWhileWalking"),[]{DestroyController(Run.SecondController);if(Run.SecondObserver.IsValid())Run.SecondObserver->Destroy();return NavReset(FVector::ZeroVector,FVector(1000,650,0),true,true);},[]{return NavFollowing()&&Aligned()&&NavTest.Travel>120&&NavTest.YawTravel>20;},.1);
+    // Demonstration: new physical position makes previously distant source visible,
+    // then an occluded event is missed while the observer continues his fixed route.
+    Add(TEXT(""),TEXT("DemoBeforeMovement"),[]{if(!NavReset(FVector::ZeroVector,FVector(1200,0,0),false,true)||!BuildEvidenceRig())return false;Run.Director->DirectObservationMaxDistance=1000;return Place(Run.A.Get(),ArenaOrigin+FVector(1150,100,64))&&Place(Run.B.Get(),ArenaOrigin+FVector(1400,650,64));},[]{return NavSeen()&&TraceProp(Run.A.Get())==ETrace::TooFar&&EvidenceMatches(0,0);},.2);
+    Add(TEXT(""),TEXT("DemoRelocate"),[]{return NavEnable();},[]{return NavArrived()&&TraceProp(Run.A.Get())==ETrace::Visible&&NavTest.Travel>550&&EvidenceMatches(0,0);},.2);
+    Add(TEXT(""),TEXT("DemoVisibleEvent"),[]{return Inspect(Run.A.Get(),true);},[]{return EvidenceMatches(1,1)&&NavStopped();});
+    Add(TEXT(""),TEXT("DemoResumeMovement"),[]{return MovePlayer(FVector(1400,600,0));},[]{return NavFollowing()&&NavTest.Travel>35;},.05);
+    Add(TEXT(""),TEXT("DemoLoseSight"),[]{return NavRemember()&&WallAt(NavRoot()+FVector(390,0,0),FVector(25,1500,500))&&PlayerRayHitsWall();},[]{return Lost()&&NavFrozenRoute()&&TraceProp(Run.B.Get())==ETrace::Occluded&&EvidenceMatches(1,1);},.05,NavFrozenRoute);
+    Add(TEXT(""),TEXT("DemoHiddenEvent"),[]{return MovePlayer(FVector(1400,1100,0))&&PlayerRayHitsWall()&&Inspect(Run.B.Get(),false);},[]{return Lost()&&NavFrozenRoute()&&EvidenceMatches(1,1);},.15,NavFrozenRoute);
+    Add(TEXT(""),TEXT("DemoStopNoEvidence"),Noop,[]{return NavStopped()&&State().Status==EStatus::LostSight&&Run.World->GetTimeSeconds()-Run.Frozen.LastSuccessfulSightingTime>=2&&EvidenceMatches(1,1);},.4,NavFrozenRoute);
+    Add(TEXT(""),TEXT("DemoReacquireNoReplay"),WallOff,[]{return NavSeen()&&NavArrived()&&NavSubmissions()>NavTest.Submissions&&EvidenceMatches(1,1)&&TraceProp(Run.B.Get())==ETrace::Visible;},.3);
+    Add(TEXT("N28"),TEXT("DemoNewEvent"),[]{return Inspect(Run.B.Get(),true);},[]{return EvidenceMatches(2,2);},.3);
+}
+// Saved-map fixture: verify authored assets first, project real walkable starts
+// and choose visible player positions. No props or saved assets are moved.
+bool PrepareSavedNavigation()
+{
+    if(!SavedMapConfig()||!Freeze(Run.Player.Get())||!Freeze(Run.Observer.Get())||!CreateWall())return false;
+    if(auto* P=Cast<ACharacter>(Run.Player.Get()))P->GetCapsuleComponent()->SetCanEverAffectNavigation(false);
+    Run.Box->SetCanEverAffectNavigation(false);
+    FVector Eye;FRotator Facing;Run.Observer->GetActorEyesViewPoint(Eye,Facing);
+    const auto At=NavRoot();const auto Yaw=BodyYaw();
+    Run.Observer->GetCapsuleComponent()->SetCanEverAffectNavigation(false);
+    if(!Place(Run.Observer.Get(),At,FRotator(0,Yaw,0)))return false;
+    // Preserve authored eye inclination while making the capsule upright.
+    Run.Observer->GetObserverEye()->SetRelativeRotation(FRotator(Facing.Pitch,FMath::FindDeltaAngleDegrees(Yaw,Facing.Yaw),Facing.Roll));
+    FBox Bounds(ForceInit);Bounds+=At;for(auto* P:{Run.A.Get(),Run.B.Get(),Run.C.Get()})Bounds+=P->GetActorLocation();
+    const auto Center=Bounds.GetCenter();const auto Extent=Bounds.GetExtent()+FVector(1600,1600,400);
+    return NavBounds(Center,Extent);
+}
+bool SavedNavigationReady()
+{
+    FNavLocation At;const auto* D=Cast<ARecastNavMesh>(NavData());
+    if(!D||D->GetRuntimeGenerationMode()!=ERuntimeGenerationType::Dynamic||!NavProject(NavRoot(),At,FVector(150,150,250)))return false;
+    if(!EvidenceMatches(0,0)||!AllOutcomesHidden())return false;
+    if(!NavTest.bSavedReady)UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=SAVED_READY original=yes dynamic=yes projected=%s"),*VectorString(At.Location));
+    NavTest.bSavedReady=true;return true;
+}
+bool ClearSavedCapsule(const FVector& Root,double Radius,double HalfHeight)
+{
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(PedroSavedNavClear),false);Params.AddIgnoredActor(Run.Observer.Get());Params.AddIgnoredActor(Run.Player.Get());
+    return !Run.World->OverlapBlockingTestByChannel(Root,FQuat::Identity,ECC_Pawn,FCollisionShape::MakeCapsule(Radius,HalfHeight),Params);
+}
+// Plan both legs against the actual saved geometry before starting the AI.
+// A predicted landing is only a search hint, never a movement instruction.
+struct FSavedNavLeg
+{
+    FVector Root=FVector::ZeroVector,Player=FVector::ZeroVector,Goal=FVector::ZeroVector,Landing=FVector::ZeroVector;
+    double SeedYaw=0,LandingYaw=0,Length=0;
+};
+struct FSavedNavSearch
+{
+    int32 Starts=0,StartRejected=0,Attempts=0,Projection=0,Clearance=0,Sight=0,Path=0,Landing=0,Props=0,Seed=0,Feasible=0,PairsRejected=0;
+    void Log(const TCHAR* Phase) const
+    {
+        UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_FIXTURE routeSearch phase=%s starts=%d startRejected=%d attempts=%d projection=%d clearance=%d sight=%d path=%d landing=%d props=%d seed=%d feasible=%d pairsRejected=%d"),
+            Phase,Starts,StartRejected,Attempts,Projection,Clearance,Sight,Path,Landing,Props,Seed,Feasible,PairsRejected);
+    }
+};
+bool SavedSightAt(const FVector& Root,double Yaw,const FVector& Target,AActor* Subject,double Range,double Cone)
+{
+    const auto* EyeComponent=Run.Observer->GetObserverEye();
+    const FRotator Rel=EyeComponent->GetRelativeRotation();
+    const FVector Eye=Root+FRotator(0,Yaw,0).RotateVector(EyeComponent->GetRelativeLocation());
+    const FVector Forward=FRotator(Rel.Pitch,Yaw+Rel.Yaw,Rel.Roll).Vector();
+    if(PedroDirectObservation::CheckGeometry(Eye,Forward,Target,Range,Cone)!=ETrace::Visible)return false;
+    FHitResult Hit;FCollisionQueryParams Params(SCENE_QUERY_STAT(PedroSavedNavRoute),false);
+    Params.AddIgnoredActor(Run.Observer.Get());Params.AddIgnoredActor(Run.Player.Get());
+    return !Run.World->LineTraceSingleByChannel(Hit,Eye,Target,ECC_Visibility,Params)||(Subject&&Hit.GetActor()==Subject);
+}
+double SavedFaceYaw(const FVector& Root,const FVector& Target)
+{
+    // The saved eye has zero horizontal offset; retain authored relative yaw.
+    return FRotator::NormalizeAxis((Target-Root).Rotation().Yaw-Run.Observer->GetObserverEye()->GetRelativeRotation().Yaw);
+}
+bool SavedLeg(const FVector& Root,double OldYaw,const FVector& Player,bool bFirst,FSavedNavLeg& Out,FSavedNavSearch& Stats)
+{
+    ++Stats.Attempts;
+    const auto* Capsule=Run.Observer->GetCapsuleComponent();
+    const auto* PlayerChar=Cast<ACharacter>(Run.Player.Get());if(!PlayerChar)return false;
+    const double ObserverHalf=Capsule->GetScaledCapsuleHalfHeight(),ObserverRadius=Capsule->GetScaledCapsuleRadius();
+    const double PlayerHalf=PlayerChar->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(),PlayerRadius=PlayerChar->GetCapsuleComponent()->GetScaledCapsuleRadius();
+    const FPedroNavigationSettings S{};
+    const double Separation=FVector::Dist2D(Player,Root);
+    if(Separation<725||Separation>1350||!ClearSavedCapsule(Player,PlayerRadius,PlayerHalf)){++Stats.Clearance;return false;}
+    FNavLocation Start,Goal;
+    const FVector Feet=Root-FVector(0,0,ObserverHalf);
+    if(!NavProject(Feet,Start,FVector(50,50,100))||FVector::Dist2D(Feet,Start.Location)>50||FMath::Abs(Feet.Z-Start.Location.Z)>100){++Stats.Projection;return false;}
+    const auto Candidates=PedroNavigationPolicy::Candidates(Root,Player,S);
+    if(Candidates.IsEmpty()||!NavProject(Candidates[0],Goal,FVector(S.ProjectionXY,S.ProjectionXY,S.ProjectionZ))||
+       !PedroNavigationPolicy::AcceptProjection(Candidates[0],Goal.Location,Player,S)){++Stats.Projection;return false;}
+    const auto Path=NavQuery(Start.Location,Goal.Location);
+    if(!Path.IsValid()||Path->GetLength()<180||Path->GetLength()>1500||Path->ContainsAnyCustomLink()){++Stats.Path;return false;}
+    const auto& Points=Path->GetPathPoints();
+    for(int32 J=0;J<Points.Num();++J)
+    {
+        if(FNavMeshNodeFlags(Points[J].Flags).IsNavLink()||Points[J].CustomNavLinkId.IsValid()||Points[J].Location.ContainsNaN()){++Stats.Path;return false;}
+        if(J>0)
+        {
+            const auto& A=Points[J-1].Location;const auto& B=Points[J].Location;
+            if(FMath::PointDistToSegment(FVector(Player.X,Player.Y,0),FVector(A.X,A.Y,0),FVector(B.X,B.Y,0))<S.PersonalSpace){++Stats.Path;return false;}
+        }
+    }
+    // This integration fixture needs predictable landing geometry, not another
+    // detour test (N12 already proves that). Prefer a nearly straight native
+    // path and a direct stand-off goal with enough room to stop naturally.
+    if(Path->GetLength()>FVector::Dist2D(Start.Location,Goal.Location)+30||FVector::Dist2D(Goal.Location,Player)>470||
+       FVector::Dist2D(Candidates[0],Goal.Location)>30||FMath::Abs(Goal.Location.Z-Start.Location.Z)>8){++Stats.Path;return false;}
+    double SeedYaw=OldYaw;
+    if(bFirst)
+    {
+        bool bSeed=false;
+        for(double Offset:{25.,-25.,15.,-15.})
+        {
+            const double Yaw=FRotator::NormalizeAxis(SavedFaceYaw(Root,Player)+Offset);
+            if(SavedSightAt(Root,Yaw,Player,nullptr,1500,70)){SeedYaw=Yaw;bSeed=true;break;}
+        }
+        if(!bSeed){++Stats.Seed;return false;}
+    }
+    else if(!SavedSightAt(Root,OldYaw,Player,nullptr,1500,70)){++Stats.Sight;return false;}
+    // Bracket the 500 cm cancellation boundary on the straight path. Check
+    // real capsule clearance, walkable ground, sight, and all original props
+    // throughout the plausible stopping envelope; actual motion is tested later.
+    const FVector GoalRoot=Goal.Location+FVector(0,0,ObserverHalf+2);
+    const FVector GroundRoot(Start.Location.X,Start.Location.Y,Start.Location.Z+ObserverHalf+2);
+    const FVector Direction=(GoalRoot-GroundRoot).GetSafeNormal2D();
+    if(Direction.IsNearlyZero()){++Stats.Landing;return false;}
+    for(double Stop:{480.,500.,520.})
+    {
+        double Lo=0,Hi=1;
+        for(int32 I=0;I<24;++I)
+        {
+            const double Mid=(Lo+Hi)*.5;
+            if(FVector::Dist2D(FMath::Lerp(GroundRoot,GoalRoot,Mid),Player)>Stop)Lo=Mid;else Hi=Mid;
+        }
+        const FVector Future=FMath::Lerp(GroundRoot,GoalRoot,(Lo+Hi)*.5);
+        if(FVector::Dist2D(Root,Future)<=150){++Stats.Landing;return false;}
+        FNavLocation Floor;
+        if(!NavProject(Future-FVector(0,0,ObserverHalf),Floor,FVector(40,40,100))||
+           FVector::Dist2D(Floor.Location,Future)>10||!ClearSavedCapsule(Future,ObserverRadius,ObserverHalf)){++Stats.Landing;return false;}
+        const double Face=SavedFaceYaw(Future,Player);
+        if(!SavedSightAt(Future,Face,Player,nullptr,1500,70)){++Stats.Sight;return false;}
+        for(auto* Prop:{Run.A.Get(),Run.B.Get(),Run.C.Get()})
+            if(!SavedSightAt(Future,Face,Prop->GetActorLocation(),Prop,Run.Director->DirectObservationMaxDistance,68)){++Stats.Props;return false;}
+        if(Stop==500){Out.Landing=Future;Out.LandingYaw=Face;}
+    }
+    Out.Root=Root;Out.Player=Player;Out.Goal=Goal.Location;Out.SeedYaw=SeedYaw;Out.Length=Path->GetLength();++Stats.Feasible;return true;
+}
+bool SavedProjectedPlayer(const FVector& At,FVector& Player,FSavedNavSearch& Stats)
+{
+    const auto* C=Cast<ACharacter>(Run.Player.Get());FNavLocation P;
+    if(!C||!NavProject(At,P,FVector(75,75,220))||FVector::Dist2D(P.Location,At)>75){++Stats.Projection;return false;}
+    Player=P.Location+FVector(0,0,C->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+2);return true;
+}
+bool FindSavedSecond(const FVector& Root,double Yaw,const FVector& PreviousPlayer,FSavedNavLeg& Out,FSavedNavSearch& Stats)
+{
+    for(double Angle:{0.,15.,-15.,25.,-25.,40.,-40.,55.,-55.,65.,-65.})
+    for(double Distance:{800.,750.,900.,1000.,1100.,1250.})
+    {
+        FVector Player;
+        if(!SavedProjectedPlayer(Root+FRotator(0,Yaw+Angle,0).Vector()*Distance,Player,Stats))continue;
+        if(FVector::Dist2D(Player,PreviousPlayer)<125){++Stats.Clearance;continue;}
+        if(SavedLeg(Root,Yaw,Player,false,Out,Stats))return true;
+    }
+    return false;
+}
+void LogSavedLeg(const TCHAR* Phase,const FSavedNavLeg& Leg)
+{
+    UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_FIXTURE savedRoute phase=%s start=%s player=%s goal=%s length=%.3f seedYaw=%.3f predictedLanding=%s landingYaw=%.3f"),
+        Phase,*VectorString(Leg.Root),*VectorString(Leg.Player),*VectorString(Leg.Goal),Leg.Length,Leg.SeedYaw,*VectorString(Leg.Landing),Leg.LandingYaw);
+}
+bool SavedRoutePosition(bool bFirst)
+{
+    if(!Run.Observer.IsValid()||!Run.Player.IsValid()||!Run.A.IsValid()||!Run.B.IsValid()||!Run.C.IsValid())return false;
+    const FVector OldRoot=NavRoot();const double OldYaw=BodyYaw();
+    FSavedNavSearch FirstStats,SecondStats;
+    if(bFirst)
+    {
+        NavTest.bSavedPair=false;
+        const auto* Capsule=Run.Observer->GetCapsuleComponent();
+        const double Half=Capsule->GetScaledCapsuleHalfHeight(),Radius=Capsule->GetScaledCapsuleRadius();
+        // Start farther back when possible, reserving space for a second leg.
+        // Search is bounded and converges before any fixture actor is moved.
+        for(double X:{-300.,-450.,-600.,-150.,0.,150.,300.})
+        for(double Y:{0.,-150.,150.,-300.,300.})
+        {
+            ++FirstStats.Starts;FNavLocation Start;
+            if(!NavProject(OldRoot+FRotator(0,OldYaw,0).RotateVector(FVector(X,Y,0)),Start,FVector(90,90,250))){++FirstStats.StartRejected;continue;}
+            const FVector Root=Start.Location+FVector(0,0,Half+2);
+            if(!ClearSavedCapsule(Root,Radius,Half)){++FirstStats.StartRejected;continue;}
+            for(double Angle:{0.,15.,-15.,25.,-25.,40.,-40.,55.,-55.})
+            for(double Distance:{800.,750.,900.,1000.,1100.,1250.})
+            {
+                FVector Player;FSavedNavLeg First,Second;
+                if(!SavedProjectedPlayer(Root+FRotator(0,OldYaw+Angle,0).Vector()*Distance,Player,FirstStats)||!SavedLeg(Root,OldYaw,Player,true,First,FirstStats))continue;
+                if(!FindSavedSecond(First.Landing,First.LandingYaw,First.Player,Second,SecondStats)){++FirstStats.PairsRejected;continue;}
+                // Only initial setup may place the observer, prior to attaching AI.
+                if(!Place(Run.Observer.Get(),Root,FRotator(0,First.SeedYaw,0))||!Place(Run.Player.Get(),Player))return false;
+                NavTest.bSavedPair=true;NavTest.SavedSecondPlayer=Second.Player;
+                LogSavedLeg(TEXT("first"),First);LogSavedLeg(TEXT("planned-second"),Second);
+                FirstStats.Log(TEXT("first"));SecondStats.Log(TEXT("lookahead"));return true;
+            }
+        }
+        FirstStats.Log(TEXT("first"));SecondStats.Log(TEXT("lookahead"));
+    }
+    else
+    {
+        if(!NavTest.bSavedPair||!NavArrived()||!Aligned())
+        {
+            UE_LOG(LogTemp,Error,TEXT("PEDRO_NAV_FIXTURE secondRoutePrecondition pair=%s arrived=%s aligned=%s awareness=%s native=%s"),
+                Yes(NavTest.bSavedPair),Yes(NavArrived()),Yes(Aligned()),StatusName(State().Status),Yes(Run.Controller.IsValid()&&Run.Controller->HasNativeSight(Run.Player.Get())));
+            return false;
+        }
+        const FVector PreviousPlayer=Run.Player->GetActorLocation();FSavedNavLeg Second;
+        // Revalidate against the actual stopping position; never move or reset
+        // Pedro to fit a predicted start. Search again only if the hint fails.
+        const bool bPlanned=FVector::Dist2D(PreviousPlayer,NavTest.SavedSecondPlayer)>=125&&SavedLeg(OldRoot,OldYaw,NavTest.SavedSecondPlayer,false,Second,SecondStats);
+        if(bPlanned||FindSavedSecond(OldRoot,OldYaw,PreviousPlayer,Second,SecondStats))
+        {
+            NavTest.SavedRelocationRoot=OldRoot;NavTest.SavedRelocationSubmissions=NavSubmissions();
+            if(!Place(Run.Player.Get(),Second.Player))return false;
+            LogSavedLeg(TEXT("actual-second"),Second);SecondStats.Log(TEXT("actual-second"));return true;
+        }
+        SecondStats.Log(TEXT("actual-second"));
+    }
+    UE_LOG(LogTemp,Error,TEXT("PEDRO_NAV_FIXTURE no suitable saved-map two-leg route phase=%s observer=%s player=%s statue=%s radio=%s lantern=%s; no asset edits attempted"),
+        bFirst?TEXT("first/lookahead"):TEXT("actual-second"),*VectorString(OldRoot),*VectorString(Run.Player->GetActorLocation()),*VectorString(Run.A->GetActorLocation()),*VectorString(Run.B->GetActorLocation()),*VectorString(Run.C->GetActorLocation()));
+    return false;
+}
+bool SavedAllVisible(){return TraceProp(Run.A.Get())==ETrace::Visible&&TraceProp(Run.B.Get())==ETrace::Visible&&TraceProp(Run.C.Get())==ETrace::Visible;}
+void MakeNavigationIntegrationSteps()
+{
+    Add(TEXT("K01"),TEXT("SavedConfigurationAndNavmesh"),PrepareSavedNavigation,SavedNavigationReady,.25);
+    Add(TEXT("K02"),TEXT("SavedAutonomousFollow"),[]{if(!SavedRoutePosition(true))return false;Run.Controller=AttachMovable(Run.Observer.Get());if(!Run.Controller.IsValid())return false;Run.Controller->SetAttentionEnabled(true);return NavEnable();},[]{return NavArrived()&&Aligned()&&NavTest.Travel>150&&NavTest.YawTravel>5&&SavedAllVisible()&&EvidenceMatches(0,0);},.3);
+    Add(TEXT("K03"),TEXT("SavedStatue"),[]{return Inspect(Run.A.Get(),true);},[]{return NavStopped()&&EvidenceMatches(1,1)&&AllOutcomesHidden();});
+    Add(TEXT("K04"),TEXT("SavedRadioOccluded"),[]{return WallForProp(Run.B.Get(),30)&&Inspect(Run.B.Get(),false);},[]{return EvidenceMatches(1,1)&&AllOutcomesHidden();},.25);
+    // Clearing collision is synchronous; reacquiring native sight is not.
+    // Keep the existing player, observer, controller and evidence stationary
+    // until a genuine new sighting and tracking decision have settled.
+    Add(TEXT(""),TEXT("SavedRestoreSightNoReplay"),[]{
+        if(!NavTest.bSavedPair||!Run.Player.IsValid()||!Run.Controller.IsValid()||!NavStopped()||!EvidenceMatches(1,1)||!AllOutcomesHidden())return false;
+        NavTest.SavedRestorePlayer=Run.Player->GetActorLocation();
+        NavTest.SavedRestoreSightingTime=State().LastSuccessfulSightingTime;
+        NavTest.SavedRestoreSubmissions=NavSubmissions();
+        return WallOff();
+    },[]{return NavArrived()&&Aligned()&&State().LastSuccessfulSightingTime>NavTest.SavedRestoreSightingTime&&
+        Run.World->GetTimeSeconds()-State().LastSuccessfulSightingTime<=.35&&SavedAllVisible();
+    },.25,[]{return Run.Player.IsValid()&&Run.Controller.IsValid()&&Run.Player->GetActorLocation().Equals(NavTest.SavedRestorePlayer,.01)&&
+        NavStopped()&&NavSubmissions()==NavTest.SavedRestoreSubmissions&&NavTest.Travel<2&&EvidenceMatches(1,1)&&AllOutcomesHidden();});
+    Add(TEXT(""),TEXT("SavedRelocationNoReplay"),[]{return SavedRoutePosition(false);},[]{return NavArrived()&&Aligned()&&NavTest.Travel>150&&FVector::Dist2D(NavRoot(),NavTest.SavedRelocationRoot)>150&&NavSubmissions()>NavTest.SavedRelocationSubmissions&&EvidenceMatches(1,1)&&SavedAllVisible();},.3);
+    Add(TEXT("K05"),TEXT("SavedNewRadio"),[]{return Inspect(Run.B.Get(),true);},[]{return EvidenceMatches(2,2)&&AllOutcomesHidden()&&NavStopped();});
+    Add(TEXT("K06"),TEXT("SavedLanternSeeking"),[]{return EvidenceMatches(2,2)&&AllOutcomesHidden()&&Inspect(Run.C.Get(),true)&&EvidenceMatches(3,3)&&AllOutcomesHidden();},FinalPresentation,.5);
+}
+
+int32 ExpectedCases() { return Run.bNavigation?(Run.bNavProbe?2:(Run.bIntegration?6:28)):(Run.bIntegration?6:(Run.bAttention?24:25)); }
+const TCHAR* SuiteName() { return Run.bNavigation?NavSuite():Run.bAttention?AttentionSuite():(Run.bIntegration?TEXT("integration"):TEXT("world")); }
 bool Finish(const TCHAR* Error=nullptr)
 {
     if (Error)
     {
+        if(Run.bNavigation)
+        {
+            const auto* Data=NavData();
+            UE_LOG(LogTemp,Error,TEXT("PEDRO_NAV_FIXTURE failure navSystem=%s navData=%s dynamic=%s capability=%s savedReady=%s"),
+                *GetNameSafe(NavSystem()),*GetNameSafe(Data),Yes(Data&&Data->GetRuntimeGenerationMode()==ERuntimeGenerationType::Dynamic),Yes(NavTest.bCapability),Yes(NavTest.bSavedReady));
+            if(Run.bIntegration&&NavTest.bSavedReady&&Run.Observer.IsValid()&&Run.Player.IsValid()&&Run.A.IsValid()&&Run.B.IsValid()&&Run.C.IsValid())
+            {
+                UE_LOG(LogTemp,Error,TEXT("PEDRO_NAV_FIXTURE savedChecks arrived=%s aligned=%s travel=%.3f yawTravel=%.3f statueTrace=%d radioTrace=%d lanternTrace=%d evidence=%d sampled=%d"),
+                    Yes(NavArrived()),Yes(Aligned()),NavTest.Travel,NavTest.YawTravel,int32(TraceProp(Run.A.Get())),int32(TraceProp(Run.B.Get())),int32(TraceProp(Run.C.Get())),EvidenceCount(),SampledCount());
+            }
+        }
         UE_LOG(LogTemp,Error,TEXT("PEDRO_AWARENESS_TEST status=FAIL index=%d reason=%s"),Run.Index,Error);
-        if (Run.Steps.IsValidIndex(Run.Index)) { if(Run.bAttention) LogAttentionSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else LogStep(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]); }
+        if (Run.Steps.IsValidIndex(Run.Index)) { if(Run.bNavigation)LogNavSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else if(Run.bAttention) LogAttentionSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else LogStep(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]); }
         LogFixtureMotion(TEXT("Observer"), Run.Observer.Get());
         LogFixtureMotion(TEXT("Player"), Run.Player.Get());
         LogFixtureMotion(TEXT("SecondObserver"), Run.SecondObserver.Get());
@@ -830,7 +1355,13 @@ bool Finish(const TCHAR* Error=nullptr)
         if (Run.SecondObserver.IsValid()) Run.SecondObserver->Destroy();
         if (Run.Distractor.IsValid()) Run.Distractor->Destroy();
     }
-    UE_LOG(LogTemp,Display,TEXT("PEDRO_AWARENESS_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),
+    if(Run.bNavigation)
+    {
+        for(const auto& A:NavTest.Geometry)if(A.IsValid())A->Destroy();
+        if(NavTest.Bounds.IsValid())NavTest.Bounds->Destroy();
+        UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),SuiteName(),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));
+    }
+    else UE_LOG(LogTemp,Display,TEXT("PEDRO_AWARENESS_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),
         SuiteName(),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));
     FPlatformMisc::RequestExit(false);
     return false;
@@ -841,7 +1372,10 @@ bool Tick(float)
     const bool bIntegration=FParse::Param(FCommandLine::Get(),TEXT("PedroAwarenessIntegration"));
     const bool bAttentionWorld=FParse::Param(FCommandLine::Get(),TEXT("PedroAttentionWorld"));
     const bool bAttentionIntegration=FParse::Param(FCommandLine::Get(),TEXT("PedroAttentionIntegration"));
-    const int32 Invocations=int32(bWorld)+int32(bIntegration)+int32(bAttentionWorld)+int32(bAttentionIntegration);
+    const bool bNavWorld=FParse::Param(FCommandLine::Get(),TEXT("PedroNavigationWorld"));
+    const bool bNavIntegration=FParse::Param(FCommandLine::Get(),TEXT("PedroNavigationIntegration"));
+    const bool bNavProbe=FParse::Param(FCommandLine::Get(),TEXT("PedroNavigationProbe"));
+    const int32 Invocations=int32(bWorld)+int32(bIntegration)+int32(bAttentionWorld)+int32(bAttentionIntegration)+int32(bNavWorld)+int32(bNavIntegration)+int32(bNavProbe);
     if (!Invocations) return false;
     if (!GEngine) return true;
     if (!Run.bBegan)
@@ -854,20 +1388,28 @@ bool Tick(float)
                 Candidate->GetOutermost()->GetName()==Map) {World=Candidate;break;}
         }
         if (!World || !World->GetFirstPlayerController() || !World->GetFirstPlayerController()->GetPawn()) return true;
-        Run.bBegan=true; Run.bIntegration=bIntegration||bAttentionIntegration; Run.bAttention=bAttentionWorld||bAttentionIntegration; Run.World=World;
+        Run.bBegan=true; Run.bIntegration=bIntegration||bAttentionIntegration||bNavIntegration; Run.bAttention=bAttentionWorld||bAttentionIntegration; Run.bNavigation=bNavWorld||bNavIntegration||bNavProbe; Run.bNavProbe=bNavProbe; Run.World=World;
         Run.PC=World->GetFirstPlayerController(); Run.Player=Run.PC->GetPawn();
-        UE_LOG(LogTemp,Display,TEXT("PEDRO_AWARENESS_TEST status=BEGIN suite=%s map=%s expected=%d"),
-            SuiteName(),Map,ExpectedCases());
+        if (Run.bNavigation)
+        {
+            UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=BEGIN suite=%s map=%s expected=%d"),
+                SuiteName(),Map,ExpectedCases());
+        }
+        else
+        {
+            UE_LOG(LogTemp,Display,TEXT("PEDRO_AWARENESS_TEST status=BEGIN suite=%s map=%s expected=%d"),
+                SuiteName(),Map,ExpectedCases());
+        }
         if (Invocations!=1 || !Run.Player->IsPlayerControlled() || !Progress()) return Finish(TEXT("InvalidInvocationOrPlayer"));
         Run.InitialProgress=Progress()->GetResolvedEncounterCount();
         if (Run.InitialProgress!=0) return Finish(TEXT("ProgressNotFresh"));
-        if (Run.bIntegration) {if(Run.bAttention) MakeAttentionIntegrationSteps();else MakeIntegrationSteps();}
+        if (Run.bIntegration) {if(Run.bNavigation)MakeNavigationIntegrationSteps();else if(Run.bAttention) MakeAttentionIntegrationSteps();else MakeIntegrationSteps();}
         else
         {
             if (!Freeze(Run.Player.Get())) return Finish(TEXT("PlayerFreezeFailed"));
             Run.Observer=SpawnObserver(ArenaOrigin,FRotator::ZeroRotator);
             if (!Run.Observer.IsValid() || !CreateWall() || !TurnObserver(0)) return Finish(TEXT("ArenaSetupFailed"));
-            if(Run.bAttention) MakeAttentionSteps();else MakeWorldSteps();
+            if(Run.bNavigation)MakeNavigationSteps();else if(Run.bAttention) MakeAttentionSteps();else MakeWorldSteps();
         }
     }
     if (!Run.World.IsValid() || !Run.PC.IsValid()) return Finish(TEXT("WorldOrPlayerControllerLost"));
@@ -875,23 +1417,27 @@ bool Tick(float)
     const FStep& Step=Run.Steps[Run.Index];
     if (!Run.bSetup)
     {
+        if(Run.bNavigation&&Run.Index>0&&!GuardNav(Run.Steps[Run.Index-1],false))return Finish(TEXT("BetweenNavigationStepInvariant"));
         if(Run.bAttention && Run.Index>0 && !GuardAttention(Run.Steps[Run.Index-1],false)) return Finish(TEXT("BetweenStepPoseOrRateInvariant"));
         Run.bSetup=true; Run.StartTime=FPlatformTime::Seconds(); Run.StableTime=0; Run.StableFrames=0;
         if (!Step.Setup()) return Finish(TEXT("SetupFailed"));
-        if(Run.bAttention){CaptureAttentionPose();LogAttentionSample(TEXT("STEP_BEGIN"),Step);}
+        if(Run.bNavigation){CaptureNavPose();LogNavSample(TEXT("STEP_BEGIN"),Step);}
+        else if(Run.bAttention){CaptureAttentionPose();LogAttentionSample(TEXT("STEP_BEGIN"),Step);}
         else LogStep(TEXT("STEP_BEGIN"),Step);
         return true; // Never accept a setup in the same tick that configured it.
     }
     const double Now=FPlatformTime::Seconds();
+    if (Run.bNavigation && !GuardNav(Step))return Finish(TEXT("NavigationPoseRateOrOwnershipInvariant"));
     if (Run.bAttention && !GuardAttention(Step)) return Finish(TEXT("AttentionPoseOrRateInvariant"));
     if (Step.Guard && !Step.Guard()) return Finish(TEXT("InvariantViolated"));
     if (Step.Check())
     {
-        const double HoldClock=Run.bAttention?Run.World->GetTimeSeconds():Now;
+        const double HoldClock=(Run.bAttention||Run.bNavigation)?Run.World->GetTimeSeconds():Now;
         if (Run.StableFrames++==0) Run.StableTime=HoldClock;
         if (Run.StableFrames>=4 && HoldClock-Run.StableTime>=Step.Hold)
         {
-            if(Run.bAttention)LogAttentionSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
+            if(Run.bNavigation)LogNavSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
+            else if(Run.bAttention)LogAttentionSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
             else LogStep(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
             if (!Step.Case.IsEmpty()) ++Run.Passed;
             ++Run.Index; Run.bSetup=false;
@@ -899,7 +1445,7 @@ bool Tick(float)
         }
     }
     else {Run.StableFrames=0;Run.StableTime=0;}
-    if (Now-Run.StartTime>8.0) return Finish(TEXT("DeadlineExceeded"));
+    if (Now-Run.StartTime>(Run.bNavigation?35.0:8.0)) return Finish(TEXT("DeadlineExceeded"));
     return true;
 }
 // This is the same process-ticker mechanism proven by the B2b-5b2 mechanical

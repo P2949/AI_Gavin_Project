@@ -21,7 +21,7 @@ public class AI_Gavin_Project : ModuleRules
 			"Slate"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] { "NavigationSystem" });
 
 		PublicIncludePaths.AddRange(new string[] {
 			"AI_Gavin_Project"

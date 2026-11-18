@@ -137,7 +137,29 @@ def engine_inspection(engine):
                     indices.update(range(max(0,i-3),min(len(lines),i+19)))
                 if not matches: print(f'NOTE: token absent: {token}')
             for i in sorted(indices): print(f'{i+1}: {lines[i]}')
-    print('PASS: local API token inspection; compile and native sight checks establish actual compatibility')
+    navigation_checks = {
+        'NavigationSystem/Public/NavigationSystem.h': ['GetNavDataForProps','ProjectPointToNavigation','FindPathSync','OnNavigationBoundsUpdated'],
+        'NavigationSystem/Public/NavigationData.h': ['EnableRecalculationOnInvalidation','IsUpToDate','IsPartial','ContainsAnyCustomLink','GetPathPoints'],
+        'NavigationSystem/Public/NavMesh/NavMeshPath.h': ['FNavMeshNodeFlags','IsNavLink'],
+        'NavigationSystem/Public/NavMesh/RecastNavMesh.h': ['ARecastNavMesh'],
+    }
+    runtime=engine/'Engine/Source/Runtime'
+    for rel,tokens in navigation_checks.items():
+        f=runtime/rel
+        if not f.is_file(): f=locate(runtime/rel.split('/')[0],Path(rel).name)
+        data=f.read_text(encoding='utf-8',errors='replace')
+        require(all(t in data for t in tokens),f'API tokens missing in {f}: {[t for t in tokens if t not in data]}')
+        print(f'PASS: {f.relative_to(engine)} ({", ".join(tokens)})')
+    for module,name,tokens in (
+        ('AIModule','PathFollowingComponent.h',['RequestMove','AbortMove','GetCurrentRequestId','HasReached']),
+        ('Engine','NavMovementComponent.h',['GetNavMovementProperties','GetNavAgentPropertiesRef']),
+        ('Engine','NavigationTypes.h',['FNavMovementProperties','bUseAccelerationForPaths','CustomNavLinkId']),
+    ):
+        matches=[f for f in (runtime/module).rglob(name) if all(t in f.read_text(encoding='utf-8',errors='replace') for t in tokens)]
+        require(len(matches)==1,f'local navigation API ambiguous or missing: {name}: {matches}')
+        print(f'PASS: {matches[0].relative_to(engine)} ({", ".join(tokens)})')
+    # Token inspection is not runtime NavMesh proof. Run navigation-probe first.
+    print('PASS: local API token inspection; compile and native sight/navigation checks establish actual compatibility')
 
 def main():
     p=argparse.ArgumentParser()
