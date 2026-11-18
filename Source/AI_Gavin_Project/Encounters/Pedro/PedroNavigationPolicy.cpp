@@ -1,4 +1,5 @@
 #include "Encounters/Pedro/PedroNavigationPolicy.h"
+#include "Encounters/Pedro/PedroContextPolicy.h"
 
 bool FPedroNavigationSettings::IsValid() const
 {
@@ -56,4 +57,11 @@ bool OwnsRequest(FAIRequestID A,FAIRequestID B)
 {return A.IsValid()&&B.IsValid()&&A.GetID()==B.GetID()&&A.GetID()!=FAIRequestID::AnyRequest.GetID();}
 bool Stalled(double E,double D,const FPedroNavigationSettings& S)
 {return FMath::IsFinite(E)&&FMath::IsFinite(D)&&E>=S.StallWindow&&D<S.StallDistance;}
+}
+
+bool PedroNavigationPolicy::IsSafeSegment(const FVector& A,const FVector& B,const FVector& Known,double Radius,bool bWithdraw)
+{
+    if(bWithdraw)return PedroContextPolicy::EscapeSegment(A,B,Known,Radius);
+    const FVector P(Known.X,Known.Y,0),Start(A.X,A.Y,0),End(B.X,B.Y,0);
+    return FMath::PointDistToSegment(P,Start,End)>=Radius;
 }

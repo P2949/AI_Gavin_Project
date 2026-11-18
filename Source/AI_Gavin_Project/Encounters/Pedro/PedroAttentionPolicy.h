@@ -4,7 +4,7 @@
 #include "Encounters/Pedro/PedroAwarenessState.h"
 
 // Attention consumes legitimate memory; it never queries the world's targets.
-enum class EPedroAttentionMode : uint8 { Disabled, Idle, TrackObserved, HoldLastKnown };
+enum class EPedroAttentionMode : uint8 { Disabled, Idle, TrackObserved, HoldLastKnown, ObserveActivity };
 
 struct FPedroAttentionSettings
 {
@@ -33,6 +33,7 @@ namespace PedroAttentionPolicy
     FPedroAttentionDecision Select(bool bEnabled, bool bObserverValid,
         const FPedroAwarenessState& Knowledge, const APawn* CurrentPlayer,
         double Now, double IdleYaw, const FPedroAttentionSettings& Settings);
+    FPedroAttentionDecision WithContext(const FPedroAttentionDecision& Base, bool bIdle, const TOptional<FVector>& Activity, double IdleYaw);
     double ShortestError(double From, double To);
     // Solve the horizontal ray from an offset eye as the root rotates.
     // Degenerate or unreachable horizontal geometry yields no request.

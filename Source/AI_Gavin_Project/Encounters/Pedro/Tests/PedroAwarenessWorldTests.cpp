@@ -31,6 +31,8 @@
 #include "Encounters/Pedro/PedroDirectObservation.h"
 #include "Encounters/Pedro/PedroEncounterDirector.h"
 #include "Encounters/Pedro/PedroObserverAIController.h"
+#include "Encounters/Pedro/PedroObserverWatchPoint.h"
+#include "Combat/Health/HealthComponent.h"
 #include "Encounters/Pedro/PedroObserverCharacter.h"
 #include "Encounters/Pedro/PedroObservationSourceComponent.h"
 #include "Encounters/Pedro/PedroPrototypeInteractableActor.h"
@@ -76,7 +78,7 @@ struct FRun
     int32 Index = 0, Passed = 0, StableFrames = 0;
     int32 InitialProgress = 0;
     double StartTime = 0, StableTime = 0;
-    bool bSetup = false, bIntegration = false, bBegan = false, bAttention = false, bNavigation = false, bNavProbe = false;
+    bool bSetup = false, bIntegration = false, bBegan = false, bAttention = false, bNavigation = false, bNavProbe = false, bContext = false, bContextProbe = false;
 };
 FRun Run;
 
@@ -379,6 +381,8 @@ bool InspectExpected(APedroPrototypeInteractableActor* Prop, ETrace Expected)
         Event.Kind!=(Before==0 ? EPedroEvidenceKind::InspectedOptionalObject : EPedroEvidenceKind::RepeatedInteraction)) return false;
     Run.Emitted.Add(Event.EventId);
     if (bVisible) Run.ExpectedAcquired.Add(Event.EventId);
+    if(Run.bContext)
+    {UE_LOG(LogTemp,Display,TEXT("PEDRO_CONTEXT_EVENT id=%s subject=%s opportunity=%s trace=%s location=%s time=%.6f director=%s"),*Event.EventId.ToString(EGuidFormats::Digits),*Event.SubjectId.ToString(),*Event.OpportunityId.ToString(),PedroDirectObservation::StatusName(Expected),*VectorString(Event.EventLocation),Event.WorldTimeSeconds,*GetNameSafe(Run.Director.Get()));}
     UE_LOG(LogTemp, Display,TEXT("PEDRO_AWARENESS_TEST status=EVENT id=%s subject=%s opportunity=%s expected=%s inspection=%d"),
         *Event.EventId.ToString(EGuidFormats::Digits),*Event.SubjectId.ToString(),*Event.OpportunityId.ToString(),
         PedroDirectObservation::StatusName(Expected),Before+1);
@@ -832,7 +836,7 @@ struct FNavigationFixture
     uint32 Submissions=0,FixedRequest=0;
     bool bOriginalAcceleration=false,bCapability=false,bSavedReady=false;
     bool bSavedPair=false;
-    FVector SavedSecondPlayer=FVector::ZeroVector;
+    FVector SavedSecondPlayer=FVector::ZeroVector, SavedSecondGoal=FVector::ZeroVector, SavedSecondLanding=FVector::ZeroVector;
     FVector SavedRelocationRoot=FVector::ZeroVector;
     uint32 SavedRelocationSubmissions=0;
     FVector SavedRestorePlayer=FVector::ZeroVector;
@@ -1262,7 +1266,7 @@ bool SavedRoutePosition(bool bFirst)
                 if(!FindSavedSecond(First.Landing,First.LandingYaw,First.Player,Second,SecondStats)){++FirstStats.PairsRejected;continue;}
                 // Only initial setup may place the observer, prior to attaching AI.
                 if(!Place(Run.Observer.Get(),Root,FRotator(0,First.SeedYaw,0))||!Place(Run.Player.Get(),Player))return false;
-                NavTest.bSavedPair=true;NavTest.SavedSecondPlayer=Second.Player;
+                NavTest.bSavedPair=true;NavTest.SavedSecondPlayer=Second.Player;NavTest.SavedSecondGoal=Second.Goal;NavTest.SavedSecondLanding=Second.Landing;
                 LogSavedLeg(TEXT("first"),First);LogSavedLeg(TEXT("planned-second"),Second);
                 FirstStats.Log(TEXT("first"));SecondStats.Log(TEXT("lookahead"));return true;
             }
@@ -1283,6 +1287,7 @@ bool SavedRoutePosition(bool bFirst)
         const bool bPlanned=FVector::Dist2D(PreviousPlayer,NavTest.SavedSecondPlayer)>=125&&SavedLeg(OldRoot,OldYaw,NavTest.SavedSecondPlayer,false,Second,SecondStats);
         if(bPlanned||FindSavedSecond(OldRoot,OldYaw,PreviousPlayer,Second,SecondStats))
         {
+            NavTest.SavedSecondPlayer=Second.Player;NavTest.SavedSecondGoal=Second.Goal;NavTest.SavedSecondLanding=Second.Landing;
             NavTest.SavedRelocationRoot=OldRoot;NavTest.SavedRelocationSubmissions=NavSubmissions();
             if(!Place(Run.Player.Get(),Second.Player))return false;
             LogSavedLeg(TEXT("actual-second"),Second);SecondStats.Log(TEXT("actual-second"));return true;
@@ -1318,8 +1323,10 @@ void MakeNavigationIntegrationSteps()
     Add(TEXT("K06"),TEXT("SavedLanternSeeking"),[]{return EvidenceMatches(2,2)&&AllOutcomesHidden()&&Inspect(Run.C.Get(),true)&&EvidenceMatches(3,3)&&AllOutcomesHidden();},FinalPresentation,.5);
 }
 
-int32 ExpectedCases() { return Run.bNavigation?(Run.bNavProbe?2:(Run.bIntegration?6:28)):(Run.bIntegration?6:(Run.bAttention?24:25)); }
-const TCHAR* SuiteName() { return Run.bNavigation?NavSuite():Run.bAttention?AttentionSuite():(Run.bIntegration?TEXT("integration"):TEXT("world")); }
+#include "PedroContextWorldTests.inl"
+
+int32 ExpectedCases() { return Run.bContext?(Run.bContextProbe?4:Run.bIntegration?6:30):Run.bNavigation?(Run.bNavProbe?2:(Run.bIntegration?6:28)):(Run.bIntegration?6:(Run.bAttention?24:25)); }
+const TCHAR* SuiteName() { return Run.bContext?ContextSuite():Run.bNavigation?NavSuite():Run.bAttention?AttentionSuite():(Run.bIntegration?TEXT("integration"):TEXT("world")); }
 bool Finish(const TCHAR* Error=nullptr)
 {
     if (Error)
@@ -1336,7 +1343,7 @@ bool Finish(const TCHAR* Error=nullptr)
             }
         }
         UE_LOG(LogTemp,Error,TEXT("PEDRO_AWARENESS_TEST status=FAIL index=%d reason=%s"),Run.Index,Error);
-        if (Run.Steps.IsValidIndex(Run.Index)) { if(Run.bNavigation)LogNavSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else if(Run.bAttention) LogAttentionSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else LogStep(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]); }
+        if (Run.Steps.IsValidIndex(Run.Index)) { if(Run.bContext)LogContextSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else if(Run.bNavigation)LogNavSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else if(Run.bAttention) LogAttentionSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else LogStep(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]); }
         LogFixtureMotion(TEXT("Observer"), Run.Observer.Get());
         LogFixtureMotion(TEXT("Player"), Run.Player.Get());
         LogFixtureMotion(TEXT("SecondObserver"), Run.SecondObserver.Get());
@@ -1345,6 +1352,7 @@ bool Finish(const TCHAR* Error=nullptr)
     const int32 Expected=ExpectedCases();
     if (Run.Box.IsValid()) Run.Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     if (Run.Blocker.IsValid()) Run.Blocker->Destroy();
+    if(Run.bContext){DestroyContextPoints();CleanContextOther();}
     DestroyController(Run.Controller); DestroyController(Run.SecondController);
     if (!Run.bIntegration)
     {
@@ -1359,7 +1367,10 @@ bool Finish(const TCHAR* Error=nullptr)
     {
         for(const auto& A:NavTest.Geometry)if(A.IsValid())A->Destroy();
         if(NavTest.Bounds.IsValid())NavTest.Bounds->Destroy();
-        UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),SuiteName(),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));
+        if(Run.bContext)
+        {UE_LOG(LogTemp,Display,TEXT("PEDRO_CONTEXT_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),SuiteName(),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));}
+        else
+        {UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),SuiteName(),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));}
     }
     else UE_LOG(LogTemp,Display,TEXT("PEDRO_AWARENESS_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),
         SuiteName(),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));
@@ -1375,7 +1386,10 @@ bool Tick(float)
     const bool bNavWorld=FParse::Param(FCommandLine::Get(),TEXT("PedroNavigationWorld"));
     const bool bNavIntegration=FParse::Param(FCommandLine::Get(),TEXT("PedroNavigationIntegration"));
     const bool bNavProbe=FParse::Param(FCommandLine::Get(),TEXT("PedroNavigationProbe"));
-    const int32 Invocations=int32(bWorld)+int32(bIntegration)+int32(bAttentionWorld)+int32(bAttentionIntegration)+int32(bNavWorld)+int32(bNavIntegration)+int32(bNavProbe);
+    const bool bContextWorld=FParse::Param(FCommandLine::Get(),TEXT("PedroContextWorld"));
+    const bool bContextIntegration=FParse::Param(FCommandLine::Get(),TEXT("PedroContextIntegration"));
+    const bool bContextProbe=FParse::Param(FCommandLine::Get(),TEXT("PedroContextProbe"));
+    const int32 Invocations=int32(bContextWorld)+int32(bContextIntegration)+int32(bContextProbe)+int32(bWorld)+int32(bIntegration)+int32(bAttentionWorld)+int32(bAttentionIntegration)+int32(bNavWorld)+int32(bNavIntegration)+int32(bNavProbe);
     if (!Invocations) return false;
     if (!GEngine) return true;
     if (!Run.bBegan)
@@ -1388,9 +1402,11 @@ bool Tick(float)
                 Candidate->GetOutermost()->GetName()==Map) {World=Candidate;break;}
         }
         if (!World || !World->GetFirstPlayerController() || !World->GetFirstPlayerController()->GetPawn()) return true;
-        Run.bBegan=true; Run.bIntegration=bIntegration||bAttentionIntegration||bNavIntegration; Run.bAttention=bAttentionWorld||bAttentionIntegration; Run.bNavigation=bNavWorld||bNavIntegration||bNavProbe; Run.bNavProbe=bNavProbe; Run.World=World;
+        Run.bBegan=true; Run.bContext=bContextWorld||bContextIntegration||bContextProbe;Run.bContextProbe=bContextProbe;Run.bIntegration=bIntegration||bAttentionIntegration||bNavIntegration||bContextIntegration; Run.bAttention=bAttentionWorld||bAttentionIntegration; Run.bNavigation=bNavWorld||bNavIntegration||bNavProbe||Run.bContext; Run.bNavProbe=bNavProbe; Run.World=World;
         Run.PC=World->GetFirstPlayerController(); Run.Player=Run.PC->GetPawn();
-        if (Run.bNavigation)
+        if(Run.bContext)
+        {UE_LOG(LogTemp,Display,TEXT("PEDRO_CONTEXT_TEST status=BEGIN suite=%s map=%s expected=%d"),SuiteName(),Map,ExpectedCases());}
+        else if (Run.bNavigation)
         {
             UE_LOG(LogTemp,Display,TEXT("PEDRO_NAV_TEST status=BEGIN suite=%s map=%s expected=%d"),
                 SuiteName(),Map,ExpectedCases());
@@ -1403,13 +1419,13 @@ bool Tick(float)
         if (Invocations!=1 || !Run.Player->IsPlayerControlled() || !Progress()) return Finish(TEXT("InvalidInvocationOrPlayer"));
         Run.InitialProgress=Progress()->GetResolvedEncounterCount();
         if (Run.InitialProgress!=0) return Finish(TEXT("ProgressNotFresh"));
-        if (Run.bIntegration) {if(Run.bNavigation)MakeNavigationIntegrationSteps();else if(Run.bAttention) MakeAttentionIntegrationSteps();else MakeIntegrationSteps();}
+        if (Run.bIntegration) {if(Run.bContext)MakeContextIntegrationSteps();else if(Run.bNavigation)MakeNavigationIntegrationSteps();else if(Run.bAttention) MakeAttentionIntegrationSteps();else MakeIntegrationSteps();}
         else
         {
             if (!Freeze(Run.Player.Get())) return Finish(TEXT("PlayerFreezeFailed"));
             Run.Observer=SpawnObserver(ArenaOrigin,FRotator::ZeroRotator);
             if (!Run.Observer.IsValid() || !CreateWall() || !TurnObserver(0)) return Finish(TEXT("ArenaSetupFailed"));
-            if(Run.bNavigation)MakeNavigationSteps();else if(Run.bAttention) MakeAttentionSteps();else MakeWorldSteps();
+            if(Run.bContext)MakeContextSteps();else if(Run.bNavigation)MakeNavigationSteps();else if(Run.bAttention) MakeAttentionSteps();else MakeWorldSteps();
         }
     }
     if (!Run.World.IsValid() || !Run.PC.IsValid()) return Finish(TEXT("WorldOrPlayerControllerLost"));
@@ -1421,13 +1437,20 @@ bool Tick(float)
         if(Run.bAttention && Run.Index>0 && !GuardAttention(Run.Steps[Run.Index-1],false)) return Finish(TEXT("BetweenStepPoseOrRateInvariant"));
         Run.bSetup=true; Run.StartTime=FPlatformTime::Seconds(); Run.StableTime=0; Run.StableFrames=0;
         if (!Step.Setup()) return Finish(TEXT("SetupFailed"));
-        if(Run.bNavigation){CaptureNavPose();LogNavSample(TEXT("STEP_BEGIN"),Step);}
+        if(Run.bContext){CaptureNavPose();CaptureContextPose();LogContextSample(TEXT("STEP_BEGIN"),Step);}
+        else if(Run.bNavigation){CaptureNavPose();LogNavSample(TEXT("STEP_BEGIN"),Step);}
         else if(Run.bAttention){CaptureAttentionPose();LogAttentionSample(TEXT("STEP_BEGIN"),Step);}
         else LogStep(TEXT("STEP_BEGIN"),Step);
         return true; // Never accept a setup in the same tick that configured it.
     }
     const double Now=FPlatformTime::Seconds();
-    if (Run.bNavigation && !GuardNav(Step))return Finish(TEXT("NavigationPoseRateOrOwnershipInvariant"));
+    if(Run.bContext)
+    {
+        const double Dt=Run.World->GetTimeSeconds()-NavTest.PrevTime;
+        if(!GuardNav(Step,false)||!GuardContext())return Finish(TEXT("ContextPoseRateOrOwnershipInvariant"));
+        if(Dt>0)LogContextSample(TEXT("FRAME"),Step,Dt);
+    }
+    else if (Run.bNavigation && !GuardNav(Step))return Finish(TEXT("NavigationPoseRateOrOwnershipInvariant"));
     if (Run.bAttention && !GuardAttention(Step)) return Finish(TEXT("AttentionPoseOrRateInvariant"));
     if (Step.Guard && !Step.Guard()) return Finish(TEXT("InvariantViolated"));
     if (Step.Check())
@@ -1436,7 +1459,8 @@ bool Tick(float)
         if (Run.StableFrames++==0) Run.StableTime=HoldClock;
         if (Run.StableFrames>=4 && HoldClock-Run.StableTime>=Step.Hold)
         {
-            if(Run.bNavigation)LogNavSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
+            if(Run.bContext)LogContextSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
+            else if(Run.bNavigation)LogNavSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
             else if(Run.bAttention)LogAttentionSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
             else LogStep(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
             if (!Step.Case.IsEmpty()) ++Run.Passed;

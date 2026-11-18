@@ -71,3 +71,12 @@ double PedroAttentionPolicy::TurnStep(double Error, double DeltaSeconds, double 
     const double Limit = Speed * FMath::Min(DeltaSeconds,Settings.MaxDeltaSeconds);
     return FMath::Clamp(Error,-Limit,Limit);
 }
+
+FPedroAttentionDecision PedroAttentionPolicy::WithContext(const FPedroAttentionDecision& Base,bool bIdle,const TOptional<FVector>& Activity,double IdleYaw)
+{
+    if(Base.Mode==EPedroAttentionMode::Disabled)return Base;
+    if(bIdle){FPedroAttentionDecision D;D.Mode=EPedroAttentionMode::Idle;D.IdleYaw=IdleYaw;return D;}
+    if(Activity.IsSet()&&FAISystem::IsValidLocation(Activity.GetValue())&&!Activity.GetValue().ContainsNaN())
+    {FPedroAttentionDecision D=Base;D.Mode=EPedroAttentionMode::ObserveActivity;D.LookPoint=Activity;return D;}
+    return Base;
+}

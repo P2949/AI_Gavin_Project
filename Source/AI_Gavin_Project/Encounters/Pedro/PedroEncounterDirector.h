@@ -148,6 +148,9 @@ public:
         return ShadowCompletionDecision;
     }
 
+    /** Strictly post-resolution; false during a reentrant progression callback. */
+    bool HasCommittedContextResolution() const { return bCommittedContextResolution; }
+
     /** Valid only after successful shared progression resolution. */
     bool HasFinalClassification() const
     {
@@ -293,6 +296,7 @@ private:
     FPedroClassificationResult FinalClassification;
     bool bActiveCompletionQueued = false;
     bool bHasFinalClassification = false;
+    bool bCommittedContextResolution = false;
     FPedroCompletionDecision ShadowCompletionDecision;
     bool bShadowCompletionQueued = false;
     bool bHasShadowCompletionDecision = false;

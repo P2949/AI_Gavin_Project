@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT=${PROJECT:-$HOME/Development/Unreal/Projects/AI_Gavin_Project}
 ENGINE=${ENGINE:-$HOME/Development/Unreal/Engines/UE_5.8.2}
 MODE=${1:-all}
-case "$MODE" in all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|rendered|unity|probe) ;; *) echo "Usage: $0 [all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|rendered|unity|probe]" >&2; exit 2;; esac
+case "$MODE" in all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|context-probe|context|context-integration|rendered|unity|probe) ;; *) echo "Usage: $0 [all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|context-probe|context|context-integration|rendered|unity|probe]" >&2; exit 2;; esac
 [[ $# -le 1 ]] || exit 2
 cd "$PROJECT"
 PROJECT=$PWD
@@ -65,13 +65,19 @@ expected={'probe':common,'unit':common+['non-unity-build','native'],
           'navigation-probe':common+['non-unity-build','navigation-probe'],
           'navigation':common+['ordinary-build','navigation'],
           'navigation-integration':common+['ordinary-build','navigation-integration'],
-          'rendered':common+['ordinary-build','rendered-world','rendered-integration','rendered-attention','rendered-attention-integration','rendered-navigation','rendered-navigation-integration'],
+          'context-probe':common+['non-unity-build','context-probe'],
+          'context':common+['ordinary-build','context'],
+          'context-integration':common+['ordinary-build','context-integration'],
+          'rendered':common+['ordinary-build','rendered-world','rendered-integration','rendered-attention','rendered-attention-integration','rendered-navigation','rendered-navigation-integration','rendered-context','rendered-context-integration'],
           'unity':common+['forced-unity-build','native-unity'],
-          'all':common+['non-unity-build','native','world','integration','attention','attention-integration','navigation','navigation-integration','rendered-world','rendered-integration','rendered-attention','rendered-attention-integration','rendered-navigation','rendered-navigation-integration','forced-unity-build','native-unity']}[mode]+['repository-audit']
+          'all':common+['non-unity-build','native','world','integration','attention','attention-integration','navigation','navigation-integration','context','context-integration','rendered-world','rendered-integration','rendered-attention','rendered-attention-integration','rendered-navigation','rendered-navigation-integration','rendered-context','rendered-context-integration','forced-unity-build','native-unity']}[mode]+['repository-audit']
 passed=(rc==0 and stages==expected)
 reports={}
 for q in sorted(p.glob('*/results.json')):
     reports[q.parent.name]=str(q.relative_to(p))
+if mode=='all':
+    runtime=['world','integration','attention','attention-integration','navigation','navigation-integration','context','context-integration']
+    passed=passed and set(reports)==set(['non-unity','unity','native','native-unity']+runtime+['rendered-'+r for r in runtime])
 summary={'status':'PASS' if passed else 'FAIL','mode':mode,'exit_status':0 if passed else max(rc,1),
          'completed_stages':stages,'expected_stages':expected,'verified_reports':reports,
          'full_acceptance':passed and mode=='all'}
@@ -175,9 +181,12 @@ runtime() {
         navigation-probe) flag=-PedroNavigationProbe; pacing=('-ExecCmds=t.MaxFPS 120') ;;
         navigation) flag=-PedroNavigationWorld; pacing=('-ExecCmds=t.MaxFPS 120') ;;
         navigation-integration) flag=-PedroNavigationIntegration; pacing=('-ExecCmds=t.MaxFPS 120') ;;
+        context-probe) flag=-PedroContextProbe; pacing=('-ExecCmds=t.MaxFPS 120') ;;
+        context) flag=-PedroContextWorld; pacing=('-ExecCmds=t.MaxFPS 120') ;;
+        context-integration) flag=-PedroContextIntegration; pacing=('-ExecCmds=t.MaxFPS 120') ;;
         *) return 1 ;;
     esac
-    if [[ "$suite" == navigation* ]]; then
+    if [[ "$suite" == navigation* || "$suite" == context* ]]; then
         # Process-only override; no project or engine ini changes. The runtime
         # fixture independently demands Dynamic Recast and real path queries.
         navconfig=('-ini:Engine:[/Script/NavigationSystem.RecastNavMesh]:RuntimeGeneration=Dynamic')
@@ -189,8 +198,8 @@ runtime() {
         "-abslog=$dir/game.log" > "$dir/terminal.log" 2>&1 || rc=$?
     printf '%s\n' "$rc" > "$dir/exit-status.txt"
     if [[ ! -s "$dir/game.log" ]]; then tail -n 80 "$dir/terminal.log"; return 1; fi
-    grep -E 'PEDRO_NAV_TEST|PEDRO_NAV_FIXTURE|PEDRO_ATTENTION_TEST|PEDRO_AWARENESS_TEST|PEDRO_AWARENESS_FIXTURE|PEDRO_DIRECT|PEDRO_SHADOW|PEDRO_OUTCOME|Engine exit requested' "$dir/game.log" > "$dir/events.txt" || true
-    grep -Ev 'PEDRO_(ATTENTION|NAV)_TEST status=FRAME ' "$dir/events.txt" || true
+    grep -E 'PEDRO_CONTEXT_|PEDRO_NAV_TEST|PEDRO_NAV_FIXTURE|PEDRO_ATTENTION_TEST|PEDRO_AWARENESS_TEST|PEDRO_AWARENESS_FIXTURE|PEDRO_DIRECT|PEDRO_SHADOW|PEDRO_OUTCOME|Engine exit requested' "$dir/game.log" > "$dir/events.txt" || true
+    grep -Ev 'PEDRO_(ATTENTION|NAV|CONTEXT)_TEST status=FRAME ' "$dir/events.txt" || true
     check_fatal "$dir/game.log"
     if ! run_nix python3 -B "$VERIFY" "$suite" "$dir/game.log" "$rc" "$dir/results.json" 2>&1 | tee "$dir/verification.txt"; then
         tail -n 80 "$dir/game.log"; return 1
@@ -207,7 +216,11 @@ touch_sources() {
         Source/AI_Gavin_Project/Encounters/Pedro/PedroAttentionPolicy.cpp \
         Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroAttentionTests.cpp \
         Source/AI_Gavin_Project/Encounters/Pedro/PedroNavigationPolicy.cpp \
-        Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroNavigationTests.cpp
+        Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroNavigationTests.cpp \
+        Source/AI_Gavin_Project/Encounters/Pedro/PedroContextPolicy.cpp \
+        Source/AI_Gavin_Project/Encounters/Pedro/PedroObserverWatchPoint.cpp \
+        Source/AI_Gavin_Project/Encounters/Pedro/PedroEncounterDirector.cpp \
+        Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroContextTests.cpp
 }
 # Do not let an existing UBT action graph survive an explicit build-mode switch.
 # Keep generated project build state recoverable, outside the report archive.
@@ -276,7 +289,7 @@ forced_unity() {
 }
 ordinary_build() {
     # A recovery archive may preserve an older source mtime. Ensure the
-    # eight relevant translation units are not skipped on an incremental build.
+    # twelve relevant translation units are not skipped on an incremental build.
     touch_sources
     build ordinary-build "${CACHE_FLAGS[@]}"
 }
@@ -285,7 +298,7 @@ if [[ "$MODE" == unity ]]; then
     native native-unity
     exit 0
 fi
-if [[ "$MODE" == all || "$MODE" == unit || "$MODE" == navigation-probe ]]; then non_unity; else ordinary_build; fi
+if [[ "$MODE" == all || "$MODE" == unit || "$MODE" == navigation-probe || "$MODE" == context-probe ]]; then non_unity; else ordinary_build; fi
 case "$MODE" in
     unit) native native ;;
     world) runtime world world no ;;
@@ -295,7 +308,10 @@ case "$MODE" in
     navigation-probe) runtime navigation-probe navigation-probe no ;;
     navigation) runtime navigation navigation no ;;
     navigation-integration) runtime navigation-integration navigation-integration no ;;
-    rendered) runtime world rendered-world yes; runtime integration rendered-integration yes; runtime attention rendered-attention yes; runtime attention-integration rendered-attention-integration yes; runtime navigation rendered-navigation yes; runtime navigation-integration rendered-navigation-integration yes ;;
+    context-probe) runtime context-probe context-probe no ;;
+    context) runtime context context no ;;
+    context-integration) runtime context-integration context-integration no ;;
+    rendered) runtime world rendered-world yes; runtime integration rendered-integration yes; runtime attention rendered-attention yes; runtime attention-integration rendered-attention-integration yes; runtime navigation rendered-navigation yes; runtime navigation-integration rendered-navigation-integration yes; runtime context rendered-context yes; runtime context-integration rendered-context-integration yes ;;
     all)
         native native
         runtime world world no
@@ -304,12 +320,16 @@ case "$MODE" in
         runtime attention-integration attention-integration no
         runtime navigation navigation no
         runtime navigation-integration navigation-integration no
+        runtime context context no
+        runtime context-integration context-integration no
         runtime world rendered-world yes
         runtime integration rendered-integration yes
         runtime attention rendered-attention yes
         runtime attention-integration rendered-attention-integration yes
         runtime navigation rendered-navigation yes
         runtime navigation-integration rendered-navigation-integration yes
+        runtime context rendered-context yes
+        runtime context-integration rendered-context-integration yes
         forced_unity
         native native-unity
         ;;
