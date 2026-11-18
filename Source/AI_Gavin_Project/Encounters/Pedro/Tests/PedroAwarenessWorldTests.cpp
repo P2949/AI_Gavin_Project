@@ -65,7 +65,7 @@ struct FRun
     int32 Index = 0, Passed = 0, StableFrames = 0;
     int32 InitialProgress = 0;
     double StartTime = 0, StableTime = 0;
-    bool bSetup = false, bIntegration = false, bBegan = false;
+    bool bSetup = false, bIntegration = false, bBegan = false, bAttention = false;
 };
 FRun Run;
 
@@ -342,12 +342,13 @@ bool WallForProp(APedroPrototypeInteractableActor* Prop, double Extent)
     if (Segment.Size() < Extent*4) return false;
     return WallAt(Eye+Segment*0.5,FVector(Extent));
 }
-bool Inspect(APedroPrototypeInteractableActor* Prop, bool bVisible)
+bool InspectExpected(APedroPrototypeInteractableActor* Prop, ETrace Expected)
 {
+    const bool bVisible=Expected==ETrace::Visible;
     auto* S = Source(Prop);
     if (!IsValid(S) || !S->bEvidenceEnabled || !Run.Player.IsValid() || !Run.Player->IsPlayerControlled() ||
-        TraceProp(Prop) != (bVisible ? ETrace::Visible : ETrace::Occluded)) return false;
-    if (!bVisible)
+        TraceProp(Prop) != Expected) return false;
+    if (Expected==ETrace::Occluded)
     {
         FVector Eye; FRotator Facing; FHitResult Hit;
         Run.Observer->GetActorEyesViewPoint(Eye,Facing);
@@ -369,8 +370,12 @@ bool Inspect(APedroPrototypeInteractableActor* Prop, bool bVisible)
     if (bVisible) Run.ExpectedAcquired.Add(Event.EventId);
     UE_LOG(LogTemp, Display,TEXT("PEDRO_AWARENESS_TEST status=EVENT id=%s subject=%s opportunity=%s expected=%s inspection=%d"),
         *Event.EventId.ToString(EGuidFormats::Digits),*Event.SubjectId.ToString(),*Event.OpportunityId.ToString(),
-        bVisible?TEXT("Visible"):TEXT("Occluded"),Before+1);
+        PedroDirectObservation::StatusName(Expected),Before+1);
     return true;
+}
+bool Inspect(APedroPrototypeInteractableActor* Prop, bool bVisible)
+{
+    return InspectExpected(Prop,bVisible?ETrace::Visible:ETrace::Occluded);
 }
 bool EvidenceMatches(int32 Expected, int32 Sampled, bool bFinal = false)
 {
@@ -565,18 +570,254 @@ void MakeIntegrationSteps()
     Add(TEXT("I06"),TEXT("LanternSeekingCompletion"),[]{return Inspect(Run.C.Get(),true);},FinalPresentation,0.8);
 }
 
+// New suites reuse the existing arena, source, Director and lifecycle helpers.
+using EAttention = EPedroAttentionMode;
+const TCHAR* AttentionName(EAttention Mode)
+{
+    switch (Mode) { case EAttention::Disabled:return TEXT("Disabled"); case EAttention::Idle:return TEXT("Idle");
+        case EAttention::TrackObserved:return TEXT("TrackObserved"); case EAttention::HoldLastKnown:return TEXT("HoldLastKnown"); }
+    return TEXT("Invalid");
+}
+const FPedroAttentionDecision& Attention()
+{
+    static const FPedroAttentionDecision Empty;
+    return Run.Controller.IsValid() ? Run.Controller->GetAttentionDecision() : Empty;
+}
+bool IsMode(EAttention Mode) { return Attention().Mode==Mode; }
+bool EnableAttention() { if(!Run.Controller.IsValid())return false;Run.Controller->SetAttentionEnabled(true);return Run.Controller->IsAttentionRunning(); }
+bool DisableAttention() { if(!Run.Controller.IsValid())return false;Run.Controller->SetAttentionEnabled(false);return !Run.Controller->IsAttentionRunning(); }
+bool MoveBearing(double Yaw,double Distance=700)
+{
+    return MovePlayer(FRotator(0,Yaw,0).Vector()*Distance);
+}
+double BodyYaw() { return Run.Observer.IsValid()?Run.Observer->GetActorRotation().Yaw:0; }
+double YawError(double Goal) { return FMath::Abs(FMath::FindDeltaAngleDegrees(BodyYaw(),Goal)); }
+bool EyeAligned(APedroObserverCharacter* Observer,const FVector& At)
+{
+    if(!IsValid(Observer))return false;
+    FVector Eye; FRotator Rotation;Observer->GetActorEyesViewPoint(Eye,Rotation);
+    const FVector Offset=At-Eye;
+    if(Offset.Size2D()<10 || Rotation.Vector().Size2D()<0.001)return false;
+    return FMath::Abs(FMath::FindDeltaAngleDegrees(Rotation.Yaw,Offset.Rotation().Yaw))<=2.6;
+}
+bool Tracking()
+{
+    return Visible() && IsMode(EAttention::TrackObserved) && Attention().LookPoint.IsSet() &&
+        Attention().LookPoint.GetValue().Equals(State().LastKnownPlayerLocation,0.01);
+}
+bool Aligned() { return Tracking() && EyeAligned(Run.Observer.Get(),State().LastKnownPlayerLocation) && AimMatchesEye(); }
+bool IdleAtAnchor() { return IsMode(EAttention::Idle) && !Attention().LookPoint.IsSet() && YawError(Attention().IdleYaw)<=2.1; }
+bool Holding() { return State().Status==EStatus::LostSight && MemoryUnchanged() && IsMode(EAttention::HoldLastKnown) &&
+    Attention().LookPoint.IsSet() && Attention().LookPoint.GetValue()==Run.Frozen.LastKnownPlayerLocation && PlayerRayHitsWall(); }
+bool FreshAttention(double Body,double PlayerBearing,bool bEnable=true)
+{
+    if(Run.Controller.IsValid() && !DisableAttention()) return false;
+    if(!WallOff() || !TurnObserver(Body) || !MoveBearing(PlayerBearing) || !FreshController()) return false;
+    return !bEnable || EnableAttention();
+}
+struct FAttentionPose
+{
+    TWeakObjectPtr<APedroObserverCharacter> Actor;
+    FVector Position=FVector::ZeroVector;
+    FRotator Rotation=FRotator::ZeroRotator;
+    FTransform Eye;
+    double PreviousYaw=0, PreviousTime=0, Total=0, Travel=0;
+    int32 Frames=0;
+    void Capture(APedroObserverCharacter* Observer,double Now)
+    {
+        *this=FAttentionPose{};Actor=Observer;
+        if(!IsValid(Observer))return;
+        Position=Observer->GetActorLocation();Rotation=Observer->GetActorRotation();
+        Eye=Observer->GetObserverEye()->GetRelativeTransform();PreviousYaw=Rotation.Yaw;PreviousTime=Now;
+    }
+    bool Check(APedroObserverAIController* Controller,double Now,double& Dt,double& Delta)
+    {
+        Dt=0;Delta=0;if(!Actor.IsValid())return false;
+        const auto R=Actor->GetActorRotation();
+        Dt=Now-PreviousTime;Delta=FMath::FindDeltaAngleDegrees(PreviousYaw,R.Yaw);
+        const auto Mode=IsValid(Controller)?Controller->GetAttentionDecision().Mode:EAttention::Disabled;
+        const double Speed=Mode==EAttention::Disabled?0:(Mode==EAttention::Idle?45:90);
+        if(!FMath::IsFinite(Dt)||Dt<0||!FMath::IsFinite(Delta)||
+            FMath::Abs(Delta)>Speed*FMath::Min(Dt,0.1)+0.12 ||
+            !Actor->GetActorLocation().Equals(Position,0.1)||
+            FMath::Abs(FMath::FindDeltaAngleDegrees(Rotation.Pitch,R.Pitch))>0.1||
+            FMath::Abs(FMath::FindDeltaAngleDegrees(Rotation.Roll,R.Roll))>0.1||
+            !Actor->GetObserverEye()->GetRelativeTransform().Equals(Eye,0.001)) return false;
+        PreviousYaw=R.Yaw;PreviousTime=Now;Total+=Delta;Travel+=FMath::Abs(Delta);++Frames;
+        return true;
+    }
+};
+FAttentionPose AttentionPose, SecondPose;
+// Independent anchors retained only in the test fixture, not the controller.
+double AnchorExpected=0, PausedYaw=0;
+FString OriginalPlayerName;
+int32 GuardEvidence=0,GuardSampled=0,GuardProgress=0;
+bool GuardFinal=false;
+FString GuardEmitted,GuardAcquired;
+bool bEarlyReacquired=false;
+const TCHAR* AttentionSuite() { return Run.bIntegration?TEXT("attention-integration"):TEXT("attention"); }
+void LogAttentionSample(const TCHAR* Kind,const FStep& Step,double Dt=0,double Delta=0,double OtherDt=0,double OtherDelta=0)
+{
+    const auto& K=State();const auto& D=Attention();
+    const auto* O=Run.Observer.Get();const auto* P=Run.Player.Get();
+    FVector Eye=FVector::ZeroVector;FRotator Facing=FRotator::ZeroRotator;
+    if(IsValid(O))O->GetActorEyesViewPoint(Eye,Facing);
+    const FRotator Body=IsValid(O)?O->GetActorRotation():FRotator::ZeroRotator;
+    const FTransform Relative=IsValid(O)?O->GetObserverEye()->GetRelativeTransform():FTransform::Identity;
+    const auto* Other=Run.SecondController.Get();const auto* OtherO=Run.SecondObserver.Get();
+    FVector OtherEye=FVector::ZeroVector;FRotator OtherFacing=FRotator::ZeroRotator;
+    if(IsValid(OtherO))OtherO->GetActorEyesViewPoint(OtherEye,OtherFacing);
+    UE_LOG(LogTemp,Display,TEXT("PEDRO_ATTENTION_TEST status=%s case=%s step=%s mode=%s awareness=%s has=%s look=%s known=%s actual=%s time=%.6f now=%.6f target=%s player=%s running=%s attention=%s body=%.6f,%.6f,%.6f root=%s eye=%s forward=%s rel=%s relRot=%s idle=%.6f error=%.6f request=%.6f dt=%.6f delta=%.6f total=%.6f travel=%.6f frames=%d evidence=%d sampled=%d emitted=%s acquired=%s final=%s progress=%d other=%s otherYaw=%.6f otherDt=%.6f otherDelta=%.6f otherTotal=%.6f otherAwareness=%s otherLook=%s otherEye=%s otherForward=%s timerActive=%s"),
+        Kind,Step.Case.IsEmpty()?TEXT("-"):*Step.Case,*Step.Name,AttentionName(D.Mode),StatusName(K.Status),Yes(K.bHasLastKnownPlayerLocation),
+        D.LookPoint.IsSet()?*VectorString(D.LookPoint.GetValue()):TEXT("-"),*VectorString(K.LastKnownPlayerLocation),
+        *VectorString(IsValid(P)?P->GetActorLocation():FVector::ZeroVector),K.LastSuccessfulSightingTime,Run.World.IsValid()?Run.World->GetTimeSeconds():0.0,
+        *GetNameSafe(K.ObservedPlayer.Get()),*GetNameSafe(P),Yes(Run.Controller.IsValid()&&Run.Controller->IsAwarenessRunning()),
+        Yes(Run.Controller.IsValid()&&Run.Controller->IsAttentionRunning()),Body.Pitch,Body.Yaw,Body.Roll,
+        *VectorString(IsValid(O)?O->GetActorLocation():FVector::ZeroVector),*VectorString(Eye),*VectorString(Facing.Vector()),
+        *VectorString(Relative.GetLocation()),*VectorString(FVector(Relative.Rotator().Pitch,Relative.Rotator().Yaw,Relative.Rotator().Roll)),
+        D.IdleYaw,D.AngularError,D.RequestedYawStep,Dt,Delta,AttentionPose.Total,AttentionPose.Travel,AttentionPose.Frames,
+        EvidenceCount(),SampledCount(),*Ids(Run.Emitted),*EvidenceIds(),Yes(Finalized()),Progress()?Progress()->GetResolvedEncounterCount():-1,
+        IsValid(Other)?AttentionName(Other->GetAttentionDecision().Mode):TEXT("None"),IsValid(OtherO)?OtherO->GetActorRotation().Yaw:0,
+        OtherDt,OtherDelta,SecondPose.Total,
+        IsValid(Other)?StatusName(Other->GetAwarenessState().Status):TEXT("None"),
+        IsValid(Other)&&Other->GetAttentionDecision().LookPoint.IsSet()?*VectorString(Other->GetAttentionDecision().LookPoint.GetValue()):TEXT("-"),
+        *VectorString(OtherEye),*VectorString(OtherFacing.Vector()),
+        Yes(Run.World.IsValid()&&Run.DestroyedTimer.IsValid()&&Run.World->GetTimerManager().TimerExists(Run.DestroyedTimer)));
+}
+void CaptureAttentionPose()
+{
+    const double Now=Run.World->GetTimeSeconds();
+    AttentionPose.Capture(Run.Observer.Get(),Now);SecondPose.Capture(Run.SecondObserver.Get(),Now);
+    GuardEvidence=EvidenceCount();GuardSampled=SampledCount();GuardProgress=Progress()?Progress()->GetResolvedEncounterCount():-1;
+    GuardFinal=Finalized();GuardEmitted=Ids(Run.Emitted);GuardAcquired=EvidenceIds();
+}
+bool GuardAttention(const FStep& Step,bool bLog=true)
+{
+    double Dt=0,Delta=0,OtherDt=0,OtherDelta=0;const double Now=Run.World->GetTimeSeconds();
+    const auto Reject=[&Step](const TCHAR* Detail)
+    {
+        UE_LOG(LogTemp,Error,TEXT("Pedro attention invariant: step=%s detail=%s"),*Step.Name,Detail);
+        return false;
+    };
+    if(!AttentionPose.Check(Run.Controller.Get(),Now,Dt,Delta))return Reject(TEXT("ObserverPoseOrRate"));
+    if(Run.SecondObserver.IsValid()&&!SecondPose.Check(Run.SecondController.Get(),Now,OtherDt,OtherDelta))return Reject(TEXT("SecondObserverPoseOrRate"));
+    // Interactions acquire evidence synchronously; the Director resolves on a later tick.
+    if(EvidenceCount()!=GuardEvidence||SampledCount()!=GuardSampled||
+        Ids(Run.Emitted)!=GuardEmitted||EvidenceIds()!=GuardAcquired)return Reject(TEXT("EvidenceHistoryChanged"));
+    if(!Progress())return Reject(TEXT("MissingProgressSubsystem"));
+    const bool bFinal=Finalized();
+    const int32 CurrentProgress=Progress()->GetResolvedEncounterCount();
+    const bool bCompletionWindow=Run.bAttention&&Run.bIntegration&&Step.Case==TEXT("J06")&&Step.Name==TEXT("SavedLanternSeeking");
+    const bool bUnchanged=bFinal==GuardFinal&&CurrentProgress==GuardProgress;
+    const bool bExpectedTransition=bCompletionWindow&&!GuardFinal&&GuardProgress==Run.InitialProgress&&
+        bFinal&&CurrentProgress==Run.InitialProgress+1&&GuardEvidence==3&&GuardSampled==3;
+    if(!bUnchanged&&!bExpectedTransition)return Reject(TEXT("UnexpectedCompletionTransition"));
+    if(Run.Director.IsValid()&&!EvidenceMatches(GuardEvidence,GuardSampled,bFinal))return Reject(TEXT("EvidenceOrProgressMismatch"));
+    if(bCompletionWindow&&(!Run.Director.IsValid()||(!bFinal&&!AllOutcomesHidden())))
+        return Reject(TEXT("PrematureCompletionPresentation"));
+    // FinalPresentation remains the terminal predicate, held stable for 0.5 game seconds.
+    // Latch only the coherent 0 -> 1 transition; never permit rollback or a second increment.
+    if(bExpectedTransition){GuardFinal=bFinal;GuardProgress=CurrentProgress;}
+    if(Step.Name==TEXT("EarlyReacquire")&&Tracking()&&Now-Run.Frozen.LastSuccessfulSightingTime<2)bEarlyReacquired=true;
+    // Every accepted frame retains the physical and evidence checks.
+    if (bLog) LogAttentionSample(TEXT("FRAME"),Step,Dt,Delta,OtherDt,OtherDelta);
+    return true;
+}
+void MakeAttentionSteps()
+{
+    Add(TEXT("A01"),TEXT("DefaultDisabled"),[]{return FreshAttention(0,40,false);},[]{return Visible()&&IsMode(EAttention::Disabled)&&YawError(0)<0.1;},0.35,PoseUnchanged);
+    Add(TEXT("A02"),TEXT("EnableWithoutSight"),[]{return FreshAttention(0,180);},[]{return NoSighting()&&IdleAtAnchor();},0.5,EmptyAwareness);
+    Add(TEXT("A03"),TEXT("InitiallyBehind"),Noop,[]{return NoSighting()&&IdleAtAnchor()&&YawError(0)<0.1;},0.7,EmptyAwareness);
+    Add(TEXT("A04"),TEXT("TurnRight"),[]{return MoveBearing(45);},[]{return Aligned()&&AttentionPose.Total>35&&YawError(45)<2.6;});
+    Add(TEXT("A05"),TEXT("TurnLeft"),[]{return MoveBearing(-10);},[]{return Aligned()&&AttentionPose.Total< -45&&YawError(-10)<2.6;});
+    Add(TEXT("A06"),TEXT("StationaryConverges"),Noop,[]{return Aligned()&&AttentionPose.Travel<0.15;},0.5);
+    Add(TEXT("A07"),TEXT("VisibleMovingPlayer"),[]{return MoveBearing(35);},[]{return Aligned()&&AttentionPose.Total>35;});
+    Add(TEXT("A08"),TEXT("BoundedAngularSpeed"),[]{return MoveBearing(-25);},[]{return Aligned()&&AttentionPose.Total< -50&&AttentionPose.Frames>=4;});
+    Add(TEXT("A09"),TEXT("WrapShortestPath"),[]{return FreshAttention(170,-150);},[]{return Aligned()&&AttentionPose.Total>30&&AttentionPose.Total<45&&BodyYaw()< -145;});
+    Add(TEXT("A10"),TEXT("OffsetEye"),[]{if(!DisableAttention())return false;Run.Observer->GetObserverEye()->SetRelativeLocationAndRotation(FVector(20,80,84),FRotator(0,10,0));return FreshAttention(0,50);},[]{return Aligned()&&AttentionPose.Total>20;});
+    Add(TEXT("A11"),TEXT("StationaryBody"),Noop,[]{return Aligned()&&AttentionPose.Travel<0.15;},0.5);
+    Add(TEXT(""),TEXT("BeforeHoldWhileTurning"),[]{return MoveBearing(70,1400);},[]{return Tracking()&&!EyeAligned(Run.Observer.Get(),State().LastKnownPlayerLocation);},0.0);
+    Add(TEXT("A12"),TEXT("HoldOnLoss"),[]{return FreezeMemory()&&BroadWall()&&PlayerRayHitsWall();},[]{return Holding()&&EyeAligned(Run.Observer.Get(),Run.Frozen.LastKnownPlayerLocation)&&AttentionPose.Total>1;},0.12,MemoryUnchanged);
+    Add(TEXT("A13"),TEXT("HiddenLateralMovement"),[]{return MoveBearing(-45,950)&&PlayerRayHitsWall();},[]{return Holding()&&EyeAligned(Run.Observer.Get(),Run.Frozen.LastKnownPlayerLocation)&&AttentionPose.Travel<0.2;},0.15,MemoryUnchanged);
+    Add(TEXT("A14"),TEXT("AttentionExpires"),Noop,[]{return State().Status==EStatus::LostSight&&MemoryUnchanged()&&IsMode(EAttention::Idle)&&!Attention().LookPoint.IsSet()&&Run.World->GetTimeSeconds()-Run.Frozen.LastSuccessfulSightingTime>=2;},0.1,MemoryUnchanged);
+    Add(TEXT("A15"),TEXT("IdleReturn"),Noop,[]{return IdleAtAnchor()&&MemoryUnchanged()&&AttentionPose.Total< -10;},0.3,MemoryUnchanged);
+    Add(TEXT(""),TEXT("BeforeEarlyLoss"),[]{if(!DisableAttention()||!Run.Observer.IsValid())return false;Run.Observer->GetObserverEye()->SetRelativeLocationAndRotation(FVector(0,0,64),FRotator::ZeroRotator);return FreshAttention(0,40);},Aligned);
+    Add(TEXT(""),TEXT("EarlyLoss"),[]{return FreezeMemory()&&BroadWall();},Holding,0.1,MemoryUnchanged);
+    Add(TEXT("A16"),TEXT("EarlyReacquire"),[]{bEarlyReacquired=false;return WallOff()&&MoveBearing(15);},[]{return bEarlyReacquired&&Aligned()&&State().LastSuccessfulSightingTime>Run.Frozen.LastSuccessfulSightingTime;});
+    Add(TEXT(""),TEXT("LateLoss"),[]{return FreezeMemory()&&BroadWall();},[]{return IdleAtAnchor()&&MemoryUnchanged()&&State().Status==EStatus::LostSight;},0.15,MemoryUnchanged);
+    Add(TEXT("A17"),TEXT("LateReacquire"),[]{return WallOff()&&MoveBearing(-40);},[]{return Aligned()&&State().LastSuccessfulSightingTime>Run.Frozen.LastSuccessfulSightingTime&&AttentionPose.Total< -30;});
+    Add(TEXT(""),TEXT("BeginMovingBeforeDisable"),[]{return MoveBearing(20);},[]{return Tracking()&&AttentionPose.Total>5&&AttentionPose.Total<45;},0.0);
+    Add(TEXT("A18"),TEXT("DisableMidTurn"),[]{PausedYaw=BodyYaw();return DisableAttention();},[]{return Visible()&&IsMode(EAttention::Disabled)&&YawError(PausedYaw)<0.1&&AttentionPose.Travel<0.1;},0.5);
+    Add(TEXT("A19"),TEXT("ReenableFreshAnchor"),[]{AnchorExpected=BodyYaw();return EnableAttention();},[]{return Aligned()&&YawError(AnchorExpected)>10&&FMath::Abs(FMath::FindDeltaAngleDegrees(AnchorExpected,Attention().IdleYaw))<0.1;});
+    Add(TEXT(""),TEXT("RepeatedEnableKeepsAnchor"),EnableAttention,[]{return Aligned()&&FMath::Abs(FMath::FindDeltaAngleDegrees(AnchorExpected,Attention().IdleYaw))<0.1;});
+    Add(TEXT("A20"),TEXT("DestroyPlayer"),[]{OriginalPlayerName=GetNameSafe(Run.Player.Get());return Run.Player.IsValid()&&Run.Player->Destroy();},[]{return !Run.Player.IsValid()&&EmptyAwareness()&&IdleAtAnchor();},0.3);
+    Add(TEXT(""),TEXT("ReplaceHidden"),[]{auto* P=SpawnObserver(ArenaOrigin-FRotator(0,BodyYaw(),0).Vector()*700,FRotator::ZeroRotator);if(!IsValid(P))return false;Run.PC->Possess(P);Run.Player=P;return P->IsPlayerControlled()&&Freeze(P);},[]{return NoSighting()&&IdleAtAnchor()&&GetNameSafe(Run.Player.Get())!=OriginalPlayerName;},0.5,EmptyAwareness);
+    Add(TEXT(""),TEXT("ReplaceVisible"),[]{return MoveBearing(AnchorExpected+30);},Aligned);
+    Add(TEXT("A21"),TEXT("UnpossessClearsAttention"),[]{Run.Controller->UnPossess();return true;},[]{return EmptyAwareness()&&!Run.Controller->IsAwarenessRunning()&&!Run.Controller->IsAttentionRunning()&&IsMode(EAttention::Disabled);},0.3);
+    Add(TEXT(""),TEXT("RepossessFreshAnchor"),[]{AnchorExpected=BodyYaw();if(!MoveBearing(AnchorExpected+180))return false;Run.Controller->Possess(Run.Observer.Get());return Freeze(Run.Observer.Get());},[]{return NoSighting()&&IdleAtAnchor()&&YawError(AnchorExpected)<0.1;},0.4,EmptyAwareness);
+    Add(TEXT(""),TEXT("RepossessNewSight"),[]{return MoveBearing(AnchorExpected-35);},Aligned);
+    Add(TEXT(""),TEXT("DestroyAttentionController"),[]{Run.DestroyedTimer=Run.Controller->GetAwarenessRefreshTimerHandle();PausedYaw=BodyYaw();return Run.DestroyedTimer.IsValid()&&Run.Controller->Destroy();},[]{return !Run.Controller.IsValid()&&!IsValid(Run.Observer->GetController())&&!Run.World->GetTimerManager().TimerExists(Run.DestroyedTimer)&&IsMode(EAttention::Disabled)&&YawError(PausedYaw)<0.1;},0.3);
+    Add(TEXT("A22"),TEXT("IndependentTurning"),[]{if(!FreshAttention(0,30))return false;Run.SecondObserver=SpawnObserver(ArenaOrigin+FVector(0,750,0),FRotator::ZeroRotator);Run.SecondController=Attach(Run.SecondObserver.Get());if(!Run.SecondController.IsValid())return false;Run.SecondController->SetAttentionEnabled(true);return true;},[]{const auto* C=Run.SecondController.Get();return Aligned()&&IsValid(C)&&C->GetAttentionDecision().Mode==EAttention::TrackObserved&&C->GetAwarenessState().Status==EStatus::Perceived&&EyeAligned(Run.SecondObserver.Get(),Run.Player->GetActorLocation())&&AttentionPose.Total>20&&SecondPose.Total< -20;});
+    Add(TEXT(""),TEXT("DemoSetup"),[]{DestroyController(Run.SecondController);if(Run.SecondObserver.IsValid())Run.SecondObserver->Destroy();Run.SecondObserver.Reset();return FreshAttention(0,0)&&BuildEvidenceRig()&&Place(Run.A.Get(),ArenaOrigin+FVector(600,-500,64))&&Place(Run.B.Get(),ArenaOrigin+FVector(800,400,64));},[]{return Aligned()&&EvidenceMatches(0,0)&&TraceProp(Run.A.Get())==ETrace::Visible;});
+    Add(TEXT(""),TEXT("DemoVisibleAction"),[]{return Inspect(Run.A.Get(),true);},[]{return Aligned()&&EvidenceMatches(1,1);});
+    Add(TEXT(""),TEXT("DemoTurnAwayFromEvent"),[]{return MoveBearing(60);},[]{return Aligned()&&AttentionPose.Total>45&&TraceProp(Run.A.Get())==ETrace::OutsideViewCone&&EvidenceMatches(1,1);});
+    Add(TEXT("A23"),TEXT("OutsideConeAction"),[]{return InspectExpected(Run.A.Get(),ETrace::OutsideViewCone);},[]{return Aligned()&&EvidenceMatches(1,1);});
+    Add(TEXT(""),TEXT("DemoHold"),[]{return FreezeMemory()&&BroadWall();},Holding,0.1,MemoryUnchanged);
+    Add(TEXT(""),TEXT("DemoHiddenAction"),[]{return MoveBearing(-35,950)&&PlayerRayHitsWall()&&Inspect(Run.B.Get(),false);},[]{return Holding()&&EvidenceMatches(1,1);},0.1,MemoryUnchanged);
+    Add(TEXT(""),TEXT("DemoIdle"),Noop,[]{return IdleAtAnchor()&&MemoryUnchanged()&&EvidenceMatches(1,1);},0.2,MemoryUnchanged);
+    Add(TEXT(""),TEXT("DemoReacquire"),[]{return WallOff()&&MoveBearing(40);},[]{return Aligned()&&EvidenceMatches(1,1)&&TraceProp(Run.B.Get())==ETrace::Visible;},0.4);
+    Add(TEXT("A24"),TEXT("DemoNewAction"),[]{return Inspect(Run.B.Get(),true);},[]{return Aligned()&&EvidenceMatches(2,2);},0.4);
+}
+
+// Saved layout has already supported a single initial facing for all three
+// real props. Search a visible player point whose predicted final facing keeps
+// all three sources in cone. No manual aim after enabling attention.
+bool PlaceSavedAttentionPlayer()
+{
+    FVector Eye;FRotator Facing;Run.Observer->GetActorEyesViewPoint(Eye,Facing);
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(PedroAttentionSavedPlayer),false);
+    Params.AddIgnoredActor(Run.Observer.Get());Params.AddIgnoredActor(Run.Player.Get());
+    for(double Offset:{30.0,-30.0,20.0,-20.0,40.0,-40.0,17.0,-17.0})
+    for(double Distance:{200.0,300.0,450.0,600.0})
+    {
+        const FVector At=Eye+Facing.Vector().RotateAngleAxis(Offset,FVector::UpVector)*Distance;
+        FHitResult Hit;if(Run.World->LineTraceSingleByChannel(Hit,Eye,At,ECC_Visibility,Params))continue;
+        const FVector Future=Facing.Vector().RotateAngleAxis(Offset,FVector::UpVector);
+        bool bAll=true;
+        for(auto* Prop:{Run.A.Get(),Run.B.Get(),Run.C.Get()})
+            if(!IsValid(Prop)||PedroDirectObservation::CheckGeometry(Eye,Future,Prop->GetActorLocation(),Run.Director->DirectObservationMaxDistance,73)!=ETrace::Visible)bAll=false;
+        if(bAll&&Place(Run.Player.Get(),At))return true;
+    }
+    return false;
+}
+void MakeAttentionIntegrationSteps()
+{
+    Add(TEXT("J01"),TEXT("SavedConfiguration"),[]{return SavedMapConfig()&&Freeze(Run.Observer.Get())&&Freeze(Run.Player.Get());},[]{return EvidenceMatches(0,0)&&AllOutcomesHidden()&&!Run.Controller.IsValid();});
+    Add(TEXT("J02"),TEXT("AutonomousSavedTurn"),[]{return PlaceSavedAttentionPlayer()&&FreshController()&&CreateWall()&&EnableAttention();},[]{return Aligned()&&AttentionPose.Travel>15&&EvidenceMatches(0,0)&&TraceProp(Run.A.Get())==ETrace::Visible&&TraceProp(Run.B.Get())==ETrace::Visible&&TraceProp(Run.C.Get())==ETrace::Visible;});
+    Add(TEXT("J03"),TEXT("SavedStatue"),[]{return Inspect(Run.A.Get(),true);},[]{return Aligned()&&EvidenceMatches(1,1)&&AllOutcomesHidden();});
+    Add(TEXT("J04"),TEXT("SavedRadioOccluded"),[]{return WallForProp(Run.B.Get(),30)&&Inspect(Run.B.Get(),false);},[]{return EvidenceMatches(1,1)&&AllOutcomesHidden();},0.3);
+    Add(TEXT(""),TEXT("SavedRestoreNoRetroactive"),WallOff,[]{return Aligned()&&EvidenceMatches(1,1)&&TraceProp(Run.B.Get())==ETrace::Visible;},0.5);
+    Add(TEXT("J05"),TEXT("SavedRadioNewAction"),[]{return Inspect(Run.B.Get(),true);},[]{return Aligned()&&EvidenceMatches(2,2)&&AllOutcomesHidden();});
+    Add(TEXT("J06"),TEXT("SavedLanternSeeking"),[]{
+        return EvidenceMatches(2,2)&&AllOutcomesHidden()&&Inspect(Run.C.Get(),true)&&
+            EvidenceMatches(3,3)&&AllOutcomesHidden();
+    },FinalPresentation,0.5);
+}
+
+int32 ExpectedCases() { return Run.bIntegration?6:(Run.bAttention?24:25); }
+const TCHAR* SuiteName() { return Run.bAttention?AttentionSuite():(Run.bIntegration?TEXT("integration"):TEXT("world")); }
 bool Finish(const TCHAR* Error=nullptr)
 {
     if (Error)
     {
         UE_LOG(LogTemp,Error,TEXT("PEDRO_AWARENESS_TEST status=FAIL index=%d reason=%s"),Run.Index,Error);
-        if (Run.Steps.IsValidIndex(Run.Index)) LogStep(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);
+        if (Run.Steps.IsValidIndex(Run.Index)) { if(Run.bAttention) LogAttentionSample(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]);else LogStep(TEXT("DIAGNOSTIC"),Run.Steps[Run.Index]); }
         LogFixtureMotion(TEXT("Observer"), Run.Observer.Get());
         LogFixtureMotion(TEXT("Player"), Run.Player.Get());
         LogFixtureMotion(TEXT("SecondObserver"), Run.SecondObserver.Get());
         LogFixtureMotion(TEXT("Distractor"), Run.Distractor.Get());
     }
-    const int32 Expected=Run.bIntegration?6:25;
+    const int32 Expected=ExpectedCases();
     if (Run.Box.IsValid()) Run.Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     if (Run.Blocker.IsValid()) Run.Blocker->Destroy();
     DestroyController(Run.Controller); DestroyController(Run.SecondController);
@@ -590,7 +831,7 @@ bool Finish(const TCHAR* Error=nullptr)
         if (Run.Distractor.IsValid()) Run.Distractor->Destroy();
     }
     UE_LOG(LogTemp,Display,TEXT("PEDRO_AWARENESS_TEST status=SUMMARY suite=%s passed=%d expected=%d result=%s"),
-        Run.bIntegration?TEXT("integration"):TEXT("world"),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));
+        SuiteName(),Run.Passed,Expected,!Error&&Run.Passed==Expected?TEXT("PASS"):TEXT("FAIL"));
     FPlatformMisc::RequestExit(false);
     return false;
 }
@@ -598,7 +839,10 @@ bool Tick(float)
 {
     const bool bWorld=FParse::Param(FCommandLine::Get(),TEXT("PedroAwarenessWorld"));
     const bool bIntegration=FParse::Param(FCommandLine::Get(),TEXT("PedroAwarenessIntegration"));
-    if (!bWorld && !bIntegration) return false;
+    const bool bAttentionWorld=FParse::Param(FCommandLine::Get(),TEXT("PedroAttentionWorld"));
+    const bool bAttentionIntegration=FParse::Param(FCommandLine::Get(),TEXT("PedroAttentionIntegration"));
+    const int32 Invocations=int32(bWorld)+int32(bIntegration)+int32(bAttentionWorld)+int32(bAttentionIntegration);
+    if (!Invocations) return false;
     if (!GEngine) return true;
     if (!Run.bBegan)
     {
@@ -610,20 +854,20 @@ bool Tick(float)
                 Candidate->GetOutermost()->GetName()==Map) {World=Candidate;break;}
         }
         if (!World || !World->GetFirstPlayerController() || !World->GetFirstPlayerController()->GetPawn()) return true;
-        Run.bBegan=true; Run.bIntegration=bIntegration; Run.World=World;
+        Run.bBegan=true; Run.bIntegration=bIntegration||bAttentionIntegration; Run.bAttention=bAttentionWorld||bAttentionIntegration; Run.World=World;
         Run.PC=World->GetFirstPlayerController(); Run.Player=Run.PC->GetPawn();
         UE_LOG(LogTemp,Display,TEXT("PEDRO_AWARENESS_TEST status=BEGIN suite=%s map=%s expected=%d"),
-            bIntegration?TEXT("integration"):TEXT("world"),Map,bIntegration?6:25);
-        if (bWorld==bIntegration || !Run.Player->IsPlayerControlled() || !Progress()) return Finish(TEXT("InvalidInvocationOrPlayer"));
+            SuiteName(),Map,ExpectedCases());
+        if (Invocations!=1 || !Run.Player->IsPlayerControlled() || !Progress()) return Finish(TEXT("InvalidInvocationOrPlayer"));
         Run.InitialProgress=Progress()->GetResolvedEncounterCount();
         if (Run.InitialProgress!=0) return Finish(TEXT("ProgressNotFresh"));
-        if (bIntegration) MakeIntegrationSteps();
+        if (Run.bIntegration) {if(Run.bAttention) MakeAttentionIntegrationSteps();else MakeIntegrationSteps();}
         else
         {
             if (!Freeze(Run.Player.Get())) return Finish(TEXT("PlayerFreezeFailed"));
             Run.Observer=SpawnObserver(ArenaOrigin,FRotator::ZeroRotator);
             if (!Run.Observer.IsValid() || !CreateWall() || !TurnObserver(0)) return Finish(TEXT("ArenaSetupFailed"));
-            MakeWorldSteps();
+            if(Run.bAttention) MakeAttentionSteps();else MakeWorldSteps();
         }
     }
     if (!Run.World.IsValid() || !Run.PC.IsValid()) return Finish(TEXT("WorldOrPlayerControllerLost"));
@@ -631,19 +875,24 @@ bool Tick(float)
     const FStep& Step=Run.Steps[Run.Index];
     if (!Run.bSetup)
     {
+        if(Run.bAttention && Run.Index>0 && !GuardAttention(Run.Steps[Run.Index-1],false)) return Finish(TEXT("BetweenStepPoseOrRateInvariant"));
         Run.bSetup=true; Run.StartTime=FPlatformTime::Seconds(); Run.StableTime=0; Run.StableFrames=0;
         if (!Step.Setup()) return Finish(TEXT("SetupFailed"));
-        LogStep(TEXT("STEP_BEGIN"),Step);
+        if(Run.bAttention){CaptureAttentionPose();LogAttentionSample(TEXT("STEP_BEGIN"),Step);}
+        else LogStep(TEXT("STEP_BEGIN"),Step);
         return true; // Never accept a setup in the same tick that configured it.
     }
     const double Now=FPlatformTime::Seconds();
+    if (Run.bAttention && !GuardAttention(Step)) return Finish(TEXT("AttentionPoseOrRateInvariant"));
     if (Step.Guard && !Step.Guard()) return Finish(TEXT("InvariantViolated"));
     if (Step.Check())
     {
-        if (Run.StableFrames++==0) Run.StableTime=Now;
-        if (Run.StableFrames>=4 && Now-Run.StableTime>=Step.Hold)
+        const double HoldClock=Run.bAttention?Run.World->GetTimeSeconds():Now;
+        if (Run.StableFrames++==0) Run.StableTime=HoldClock;
+        if (Run.StableFrames>=4 && HoldClock-Run.StableTime>=Step.Hold)
         {
-            LogStep(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
+            if(Run.bAttention)LogAttentionSample(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
+            else LogStep(Step.Case.IsEmpty()?TEXT("CHECK"):TEXT("PASS"),Step);
             if (!Step.Case.IsEmpty()) ++Run.Passed;
             ++Run.Index; Run.bSetup=false;
             return true;

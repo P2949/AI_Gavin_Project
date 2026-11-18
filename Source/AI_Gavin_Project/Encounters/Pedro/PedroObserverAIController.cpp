@@ -45,10 +45,67 @@ void APedroObserverAIController::GetPlayerViewPoint(FVector& Location, FRotator&
 
 void APedroObserverAIController::UpdateControlRotation(float DeltaTime, bool bUpdatePawn)
 {
-    // Awareness must not implicitly rotate the physical eye. Later attention
-    // policy will own deliberate turning. Do not call Super's facing logic.
-    static_cast<void>(DeltaTime);
-    static_cast<void>(bUpdatePawn);
+    // Never call the base AI focus/facing logic. Only this optional policy
+    // owns physical yaw; no actor target or live player transform is used.
+    if (!IsAttentionRunning()) { Attention = {}; return; }
+    auto* Observer = Cast<APedroObserverCharacter>(GetPawn());
+    UWorld* World = GetWorld();
+    const APlayerController* PC = World->GetFirstPlayerController();
+    const APawn* Player = PC ? PC->GetPawn() : nullptr;
+    if (!IsSupportedPlayer(Player) || Player->GetWorld() != World) Player = nullptr;
+    Attention = PedroAttentionPolicy::Select(true,true,Awareness,Player,
+        World->GetTimeSeconds(),IdleYaw.GetValue(),AttentionSettings);
+    if (!bUpdatePawn || Attention.Mode == EPedroAttentionMode::Disabled) return;
+    FRotator Body = Observer->GetActorRotation();
+    if (Body.ContainsNaN()) return;
+    TOptional<double> Error;
+    if (Attention.LookPoint.IsSet())
+    {
+        FVector Eye; FRotator Facing;
+        Observer->GetActorEyesViewPoint(Eye,Facing);
+        Error = PedroAttentionPolicy::LookError(Observer->GetActorLocation(),Eye,Facing.Vector(),
+            Attention.LookPoint.GetValue(),AttentionSettings.MinimumHorizontalDistance);
+    }
+    else Error = PedroAttentionPolicy::ShortestError(Body.Yaw,Attention.IdleYaw);
+    if (!Error.IsSet()) return;
+    Attention.AngularError = Error.GetValue();
+    Attention.RequestedYawStep = PedroAttentionPolicy::TurnStep(Attention.AngularError,DeltaTime,
+        Attention.Mode == EPedroAttentionMode::Idle ? AttentionSettings.IdleDegreesPerSecond : AttentionSettings.TrackDegreesPerSecond,
+        AttentionSettings);
+    if (Attention.RequestedYawStep == 0) return;
+    Body.Yaw = FRotator::NormalizeAxis(Body.Yaw + Attention.RequestedYawStep);
+    Observer->SetActorRotation(Body,ETeleportType::None);
+}
+
+bool APedroObserverAIController::IsAttentionRunning() const
+{
+    return bAttentionEnabled && bRunning && GetWorld() && IdleYaw.IsSet() &&
+        IsValid(Cast<APedroObserverCharacter>(GetPawn()));
+}
+
+void APedroObserverAIController::ResetAttention()
+{
+    IdleYaw.Reset();
+    Attention = {};
+}
+
+void APedroObserverAIController::CaptureAttentionAnchor()
+{
+    ResetAttention();
+    const auto* Observer = Cast<APedroObserverCharacter>(GetPawn());
+    if (!bAttentionEnabled || !bRunning || !IsValid(Observer)) return;
+    const double Yaw = Observer->GetActorRotation().Yaw;
+    if (!FMath::IsFinite(Yaw)) return;
+    IdleYaw = FRotator::NormalizeAxis(Yaw);
+    Attention.Mode = EPedroAttentionMode::Idle;
+    Attention.IdleYaw = IdleYaw.GetValue();
+}
+
+void APedroObserverAIController::SetAttentionEnabled(bool bEnabled)
+{
+    if (bAttentionEnabled == bEnabled) return;
+    bAttentionEnabled = bEnabled;
+    CaptureAttentionAnchor();
 }
 
 bool APedroObserverAIController::IsSupportedPlayer(const AActor* Candidate)
@@ -71,6 +128,7 @@ void APedroObserverAIController::OnPossess(APawn* InPawn)
     ObserverPerception->ForgetAll();
     ObserverPerception->OnTargetPerceptionUpdated.AddUniqueDynamic(this, &APedroObserverAIController::HandleSightUpdate);
     bRunning = true;
+    CaptureAttentionAnchor();
     ObserverPerception->SetSenseEnabled(UAISense_Sight::StaticClass(), true);
     ObserverPerception->RequestStimuliListenerUpdate();
     GetWorld()->GetTimerManager().SetTimer(RefreshTimer, this,
@@ -80,6 +138,7 @@ void APedroObserverAIController::OnPossess(APawn* InPawn)
 void APedroObserverAIController::StopAwareness()
 {
     bRunning = false;
+    ResetAttention();
     if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(RefreshTimer);
     Awareness.Reset();
     if (IsValid(ObserverPerception))

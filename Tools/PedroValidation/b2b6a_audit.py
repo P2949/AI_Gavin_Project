@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -57,6 +58,25 @@ def locate(root, name):
     require(len(files)==1,f'expected one {name} in {root}; found {files}')
     return files[0]
 
+def inspect_unity_flags(engine):
+    # UE 5.8.2 moved DisableUnity onto TargetDescriptor; adaptive Unity
+    # remains a TargetRules setting. Bind the attribute to its actual property.
+    configuration=engine/'Engine/Source/Programs/UnrealBuildTool/Configuration'
+    descriptor=configuration/'Descriptors/TargetDescriptor.cs'
+    rules=configuration/'Rules/TargetRules.cs'
+    for path, flag, prop, value in (
+        (descriptor, '-DisableUnity', 'bUseUnityBuild', 'false'),
+        (rules, '-DisableAdaptiveUnity', 'bUseAdaptiveUnityBuild', 'false'),
+        (rules, '-ForceUnity', 'bForceUnityBuild', None),
+    ):
+        data=path.read_text(encoding='utf-8-sig')
+        value_pattern=r'\s*,\s*Value\s*=\s*"'+value+'"' if value is not None else ''
+        pattern=(r'\[CommandLine\(\s*"'+re.escape(flag)+'"'+value_pattern+r'\s*\)\]'
+                 r'(?:\s*\[[^\]\r\n]+\])*\s*public\s+bool\s+'+prop+r'\s*\{')
+        require(re.search(pattern,data) is not None,
+                f'local {flag} declaration for {prop} missing: {path}')
+        print(f'PASS: {flag} declared for {prop} in {path.relative_to(engine)}')
+
 def engine_inspection(engine):
     engine=Path(engine).expanduser().resolve()
     version=engine/'Engine/Build/Build.version'
@@ -64,11 +84,7 @@ def engine_inspection(engine):
     v=json.loads(version.read_text())
     require(tuple(v[k] for k in ('MajorVersion','MinorVersion','PatchVersion'))==(5,8,2),f'expected UE 5.8.2, got {v}')
     print('PASS: local engine Build.version is 5.8.2')
-    ubt=engine/'Engine/Source/Programs/UnrealBuildTool/Configuration/Rules/TargetRules.cs'
-    data=ubt.read_text(encoding='utf-8-sig')
-    require('[CommandLine("-DisableAdaptiveUnity", Value = "false")]' in data
-            and 'bUseAdaptiveUnityBuild' in data, f'local adaptive Unity flag missing: {ubt}')
-    print(f'PASS: -DisableAdaptiveUnity declared in {ubt.relative_to(engine)}')
+    inspect_unity_flags(engine)
     root=engine/'Engine/Source/Runtime/AIModule'
     require(root.is_dir(),f'missing AIModule headers: {root}')
     checks={
@@ -84,6 +100,20 @@ def engine_inspection(engine):
         data=path.read_text(encoding='utf-8',errors='replace')
         require(all(t in data for t in tokens),f'API tokens missing in {path}: {[t for t in tokens if t not in data]}')
         print(f'PASS: {path.relative_to(engine)} ({", ".join(tokens)})')
+    # Verify the installed source actually invokes the rotation hook in Tick.
+    controller=locate(root,'AIController.cpp')
+    controller_data=controller.read_text(encoding='utf-8',errors='replace')
+    tick=re.search(r'void\s+AAIController::Tick\s*\([^)]*\)\s*\{',controller_data)
+    require(tick is not None,'AAIController::Tick not found in local source')
+    depth=1;end=tick.end()
+    for i in range(end,len(controller_data)):
+        if controller_data[i]=='{':depth+=1
+        elif controller_data[i]=='}':depth-=1
+        if depth==0:end=i;break
+    require(depth==0 and re.search(r'UpdateControlRotation\s*\(\s*DeltaTime\s*(?:,\s*true\s*)?\)',controller_data[tick.end():end]) is not None,
+            'local Tick does not call the expected rotation hook; inspect before building')
+    print(f'PASS: local AAIController::Tick calls UpdateControlRotation(DeltaTime)')
+    print(controller_data[tick.start():end+1])
     # The installed engine distribution may contain only public headers. A
     # token check is a capability preflight, not a proof of semantics.
     inspect={
