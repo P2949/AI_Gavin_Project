@@ -27,7 +27,9 @@ NEW='InitialState FirstSighting RefreshSighting LoseSight IgnoreFailedStimulusLo
 NATIVE_NAMES={PREFIX+group+'.'+name for group,names in OLD_GROUPS.items() for name in names.split()} | {PREFIX+'Awareness.'+name for name in NEW}
 ATTENTION_NAMES='Disabled IdleWithoutKnowledge TrackFreshSighting UpdateObservedTarget HoldLastKnown HoldExpiry StalePerceived Reacquire InvalidTarget InvalidLocation InvalidTime InvalidSettings TurnLeft TurnRight ShortestPath OppositeHeading DeadZone SpeedAndOvershoot InvalidDeltaTime DegenerateGeometry'.split()
 NATIVE_NAMES |= {PREFIX+'Attention.'+name for name in ATTENTION_NAMES}
-assert len(NATIVE_NAMES)==101
+NAVIGATION_NAMES='Disabled InvalidObserver NoKnowledge FreshObservedTarget InvalidTarget InvalidLocation InvalidTime InvalidSettings StartDistance StopDistance Hysteresis PreferredDestination PersonalSpace DegenerateGeometry CandidateGeneration CandidateRanking ProjectionLimits PartialAndExcessivePaths RetainExistingRequest ReplanThresholds ContinueLastKnown StaleAndExpiredKnowledge FailureCooldown RequestOwnership'.split()
+NATIVE_NAMES |= {PREFIX+"Navigation."+name for name in NAVIGATION_NAMES}
+assert len(NATIVE_NAMES)==125
 MAP='/Game/AI_Gavin/Encounters/Pedro/Validation/L_Pedro_ObserverActorTest'
 # Protocol sequence: ID (or - for substep), step, awareness, accepted, sampled.
 # Asterisk is deliberately unconstrained only for I04: event LOS is independent
@@ -96,15 +98,15 @@ def need(condition,msg):
 
 def native(report,exit_status=0):
     tests=report['tests']; names=[t['fullTestPath'] for t in tests]
-    need(len(names)==101 and len(set(names))==101,'expected exactly 101 unique native tests')
+    need(len(names)==125 and len(set(names))==125,'expected exactly 125 unique native tests')
     need(set(names)==NATIVE_NAMES,f'native inventory differs: missing={sorted(NATIVE_NAMES-set(names))} extra={sorted(set(names)-NATIVE_NAMES)}')
     for t in tests:
         need(t['state']=='Success' and t['warnings']==0 and t['errors']==0, f'native failure: {t["fullTestPath"]}')
-    need(report['succeeded']==101,'incorrect success total')
+    need(report['succeeded']==125,'incorrect success total')
     for field in ['succeededWithWarnings','failed','notRun','inProcess']:
         need(report[field]==0,f'{field} nonzero')
-    need(exit_status==0,f'all 101 native tests passed, but native process exit {exit_status}')
-    return {'status':'PASS','baseline':81,'new':20,'total':101,'tests':sorted(names)}
+    need(exit_status==0,f'all 125 native tests passed, but native process exit {exit_status}')
+    return {'status':'PASS','baseline':101,'new':24,'total':125,'tests':sorted(names)}
 
 def native_diagnostics(report, exit_status):
     """Report test failures separately from process failures; never grants acceptance."""
@@ -249,7 +251,8 @@ def verify_runtime(text,suite,exit_status=0):
 UNITY_SOURCES = tuple('Source/AI_Gavin_Project/Encounters/Pedro/'+name for name in (
     'PedroObserverAIController.cpp', 'Tests/PedroAwarenessStateTests.cpp',
     'Tests/PedroObserverAIControllerTests.cpp', 'Tests/PedroAwarenessWorldTests.cpp',
-    'PedroAttentionPolicy.cpp','Tests/PedroAttentionTests.cpp'))
+    'PedroAttentionPolicy.cpp','Tests/PedroAttentionTests.cpp',
+    'PedroNavigationPolicy.cpp','Tests/PedroNavigationTests.cpp'))
 UNITY_NAME = r'Module\.AI_Gavin_Project(?:\.\d+)?\.cpp'
 
 def verify_unity(text, project, exit_status):
@@ -524,8 +527,367 @@ def verify_non_unity(text,exit_status):
     return {'status':'PASS','suite':'non-unity','expected':len(UNITY_SOURCES),'compiled_sources':list(UNITY_SOURCES)}
 
 
+# Navigation protocol is independent of the stationary awareness/attention protocols.
+NAV_TAG='PEDRO_NAV_TEST '
+NAV_WORLD='''N01 DisabledWithNavmesh
+N02 InitiallyHidden
+N03 WithinBand
+N04 NativeFollow
+N05 StandoffArrival
+N06 HysteresisIdle
+- ApproachWhileMoving
+N07 PlayerApproaches
+N08 SpeedAndBraking
+- BeforeReplan
+N09 ReplanVisible
+N10 SmallMovementRetained
+- RateFirst
+- RateSecond
+N11 BoundedReplanning
+N12 NativeDetour
+N13 NoNavigableStart
+N14 OffmeshGoal
+N15 DisconnectedRoute
+N16 PhysicalStall
+N17 RetryAfterBlockCleared
+- BeforeStationaryLoss
+N18 StationaryLoss
+- BeforeFollowingLoss
+N19 ContinueFixedRoute
+N20 HiddenMoveNoRetarget
+N21 ExpiredStops
+N22 ReacquireNewRoute
+- BeforeDisable
+- DisabledStopsAndRestores
+N23 ReenableFresh
+N24 PlayerReplacement
+- BeforeUnpossess
+- UnpossessStops
+- RepossessMoves
+N25 DestroyControllerStops
+N26 IndependentRoutes
+N27 AttentionWhileWalking
+- DemoBeforeMovement
+- DemoRelocate
+- DemoVisibleEvent
+- DemoResumeMovement
+- DemoLoseSight
+- DemoHiddenEvent
+- DemoStopNoEvidence
+- DemoReacquireNoReplay
+N28 DemoNewEvent'''
+NAV_SAVED='''K01 SavedConfigurationAndNavmesh
+K02 SavedAutonomousFollow
+K03 SavedStatue
+K04 SavedRadioOccluded
+- SavedRestoreSightNoReplay
+- SavedRelocationNoReplay
+K05 SavedNewRadio
+K06 SavedLanternSeeking'''
+NAV_PLANS={'navigation': [tuple(x.split()) for x in NAV_WORLD.splitlines()],
+           'navigation-integration':[tuple(x.split()) for x in NAV_SAVED.splitlines()],
+           'navigation-probe':[('N01','DisabledWithNavmesh'),('N04','NativeFollow')]}
+NAV_COUNTS={s:sum(c!='-' for c,_ in p) for s,p in NAV_PLANS.items()}
+assert NAV_COUNTS=={'navigation':28,'navigation-integration':6,'navigation-probe':2}
+NAV_EVENTS={
+    'navigation': [('DemoVisibleEvent','AwarenessPropA','Visible',1),('DemoHiddenEvent','AwarenessPropB','Occluded',1),('DemoNewEvent','AwarenessPropB','Visible',2)],
+    'navigation-integration':[('SavedStatue','Inspect_Statue','Visible',1),('SavedRadioOccluded','Inspect_Radio','Occluded',1),('SavedNewRadio','Inspect_Radio','Visible',2),('SavedLanternSeeking','Inspect_Lantern','Visible',1)],
+    'navigation-probe':[]}
+NAV_VECTORS='root start velocity body eye forward rel relRot goal sighting known actual otherRoot'.split()
+NAV_FLOATS='now dt travel yawTravel maxSide sightTime planTime length time speedLimit accel brake'.split()
+NAV_INTS='reason attention id submissions evidence sampled progress otherId'.split()
+NAV_BOOLS='running active valid has grounded final accelPaths'.split()
+NAV_STRINGS='status case step mode controller awareness target player emitted acquired'.split()
+NAV_MODES={'Disabled','Idle','FollowObserved','ContinueLastKnown','Blocked'}
+
+def nav_fields(line):
+    result={}
+    for token in line.split(NAV_TAG,1)[1].split():
+        need('=' in token,'malformed navigation marker')
+        k,v=token.split('=',1);need(k and v and k not in result,'duplicate/empty navigation field');result[k]=v
+    return result
+
+def nav_sample(d, *, replacement_prior=None, replacement_start=None, replacement_prev=None):
+    need(set(d)==set(NAV_VECTORS+NAV_FLOATS+NAV_INTS+NAV_BOOLS+NAV_STRINGS),'navigation sample fields differ')
+    r=dict(d)
+    for k in NAV_VECTORS:r[k]=vec(d[k])
+    for k in NAV_FLOATS:
+        r[k]=float(d[k]);need(math.isfinite(r[k]),f'nonfinite {k}')
+    for k in NAV_INTS:
+        r[k]=int(d[k]);need(r[k]>=0,f'negative {k}')
+    for k in NAV_BOOLS:
+        need(d[k] in ('yes','no'),f'invalid {k}');r[k]=d[k]=='yes'
+    for k in ('emitted','acquired'):r[k]=ids(d[k])
+    need(r['mode'] in NAV_MODES and r['awareness'] in ('Unaware','Perceived','LostSight'),'invalid navigation/awareness mode')
+    need(r['attention'] in range(4) and r['reason'] in range(18),'invalid reason or attention')
+    need(r['now']>=0 and r['dt']>=0 and r['travel']>=0 and r['yawTravel']>=0 and r['maxSide']>=0 and r['time']>=0 and r['time']<=r['now']+1e-4,'invalid clock or rate metadata')
+    need(r['evidence']==len(r['acquired']) and r['sampled']<=r['evidence'] and set(r['acquired'])<=set(r['emitted']),'incoherent evidence counters')
+    need(r['final']==(r['progress']==1) and r['progress'] in (0,1),'incoherent progression')
+    need(abs(r['body'][0])<=.51 and abs(r['body'][2])<=.51 and math.hypot(*r['velocity'][:2])<=185.1,'invalid physical pose or speed')
+    if r['running']:
+        need(abs(r['speedLimit']-180)<.01 and abs(r['accel']-500)<.01 and abs(r['brake']-600)<.01 and r['accelPaths'],'navigation movement configuration incorrect')
+    if r['active']:
+        need(r['running'] and r['valid'] and r['id']>0 and r['grounded'],'invalid owned route')
+        need(r['mode'] in ('FollowObserved','ContinueLastKnown'),'active route in non-follow mode')
+        need(0<r['length']<=2200.1 and r['submissions']>0 and 0<=r['sightTime']<=r['planTime']+1e-4<=r['now']+1e-3,'invalid route length/time')
+        need(349.9<=math.dist(r['goal'][:2],r['sighting'][:2])<=550.1,'destination not at valid stand-off')
+    else:need(r['id']==0 and not r['valid'] and r['length']==0 and pos_equal(r['goal'],(0,0,0),.01),'orphaned route metadata')
+    if r['awareness']=='Unaware':need(not r['has'] and r['target']=='None' and pos_equal(r['known'],(0,0,0),.01) and r['time']==0,'unaware has spatial memory')
+    else:
+        need(r['has'] and (r['target']!='None' or replacement_prior is not None),'missing spatial memory')
+    if replacement_prior is not None:
+        verify_replacement_sample(r,replacement_prior,replacement_start,replacement_prev)
+    return r
+
+
+def verify_replacement_sample(m,prior,start,prev):
+    # N24 destroys the old pawn synchronously in fixture Setup(), then captures
+    # STEP_BEGIN before the next world tick. The weak target becomes null before
+    # the awareness timer (0.1 s) can clear its historical snapshot. Navigation
+    # must cancel on the next sampled tick, independently of that timer.
+    need(m['case']=='N24' and m['step']=='PlayerReplacement' and prior['step']=='ReenableFresh',
+         'replacement exception outside N24')
+    need(prior['active'] and prior['awareness']=='Perceived' and prior['has'] and prior['target']==prior['player']!='None',
+         'replacement requires a previously owned observed route')
+    need(m['controller']==prior['controller']!='None' and m['player'] not in ('None',prior['player']) and m['running'] and m['submissions']==prior['submissions'],
+         'replacement identity or submission count changed')
+    def stale_snapshot(reference):
+        need(m['awareness']=='Perceived' and m['has'] and m['target']=='None' and pos_equal(m['known'],reference['known'],.01),
+             'replacement retained foreign or changed memory')
+    if m['status']=='STEP_BEGIN':
+        need(start is None and prev is None,'duplicate replacement begin')
+        if m['awareness']!='Unaware':
+            stale_snapshot(prior)
+            need(m['time']>=prior['time'],'replacement sighting time regressed')
+        if m['active']:
+            need(m['mode']==prior['mode'] and m['id']==prior['id'] and m['goal']==prior['goal'] and m['sighting']==prior['sighting'] and m['sightTime']==prior['sightTime'] and m['planTime']==prior['planTime'] and m['length']==prior['length'],
+                 'replacement begin changed old owned route')
+        return
+    need(start is not None and prev is not None and m['status'] in ('FRAME','PASS') and m['player']==start['player'],
+         'replacement frame without matching begin')
+    need(not m['active'] and m['mode']=='Idle' and m['id']==0,'replacement retained or issued a route after setup')
+    if m['awareness']!='Unaware':
+        # Only a frozen, invalid weak target from setup can persist briefly;
+        # no active movement, re-sighting, or resurrection after clearing.
+        need(m['status']=='FRAME' and start['awareness']=='Perceived' and prev['awareness']=='Perceived' and m['now']-start['now']<=.2001,
+             'replacement memory not cleared within bounded refresh window')
+        stale_snapshot(start)
+        need(m['time']==start['time'],'replacement stale timestamp changed')
+    else:
+        need(m['target']=='None' and not m['has'],'replacement memory did not clear')
+
+def saved_heading_error(m):
+    dx=m['actual'][0]-m['eye'][0];dy=m['actual'][1]-m['eye'][1]
+    fx,fy=m['forward'][:2]
+    need(math.hypot(dx,dy)>=10 and math.hypot(fx,fy)>=.001,'degenerate saved heading')
+    bearing=math.degrees(math.atan2(dy,dx));facing=math.degrees(math.atan2(fy,fx))
+    return abs((bearing-facing+180)%360-180)
+
+
+def verify_saved_follow(start,end):
+    # The initial orientation is set only during fixture setup. Require a real
+    # off-axis target and net convergence, not merely accumulated yaw travel.
+    need(11.9<=saved_heading_error(start)<=30.1,'saved follow starts without a valid off-axis target')
+    need(not start['active'] and start['submissions']==0,'saved follow already had a route at setup')
+    need(pos_equal(start['actual'],end['actual'],.01),'saved follow target moved during test')
+    need(end['attention']==2 and saved_heading_error(end)<=2.7,'saved follow did not converge on observed player')
+    net=abs((end['body'][1]-start['body'][1]+180)%360-180)
+    need(net>5 and end['yawTravel']>5 and end['travel']>150 and end['submissions']>0,'saved follow lacks actual movement/turn')
+
+
+def verify_saved_continuity(prior,start):
+    need(prior is not None and prior['controller']==start['controller'] and prior['player']==start['player'] and start['running'], 'saved observer/controller identity changed between legs')
+    need(pos_equal(prior['root'],start['root'],.1) and pos_equal(prior['body'],start['body'],.1) and pos_equal(prior['rel'],start['rel'],.01) and pos_equal(prior['relRot'],start['relRot'],.01),'saved observer pose changed between steps')
+    need(not prior['active'] and not start['active'] and start['submissions']==prior['submissions'],'saved setup changed movement request')
+    if start['step']=='SavedRelocationNoReplay':
+        need(math.dist(start['actual'][:2],prior['actual'][:2])>=124.99 and math.dist(start['root'][:2],start['actual'][:2])>=649.99,'second leg lacks a new distant player position')
+    else:
+        need(pos_equal(prior['actual'],start['actual'],.01),'saved player relocated outside intended setup')
+
+
+def verify_saved_restore_sample(start,m):
+    need(m['controller']==start['controller'] and m['player']==start['player'] and pos_equal(m['actual'],start['actual'],.01) and m['running'], 'saved sight restoration changed identity or player position')
+    need(not m['active'] and m['submissions']==start['submissions'] and m['travel']<2 and math.dist(m['root'][:2],start['root'][:2])<2 and math.hypot(*m['velocity'][:2])<1.01,'saved sight restoration moved or submitted a route')
+    need(m['emitted']==start['emitted'] and m['acquired']==start['acquired'] and m['evidence']==m['sampled']==1 and not m['final'] and m['progress']==0,'saved sight restoration altered evidence')
+
+
+def saved_restore_ready(start,m):
+    return (m['awareness']=='Perceived' and m['has'] and m['target']==m['player'] and pos_equal(m['known'],m['actual'],1.01)
+            and m['time']>start['time'] and m['now']-m['time']<=.3501 and m['attention']==2 and m['mode']=='Idle'
+            and 250<=math.dist(m['root'][:2],m['known'][:2])<=505 and saved_heading_error(m)<=2.7)
+
+
+def verify_saved_relocation(start,end):
+    need(start['controller']==end['controller'] and start['player']==end['player'] and pos_equal(start['actual'],end['actual'],.01),'second leg target or controller changed during movement')
+    need(end['submissions']>start['submissions'] and not end['active'],'second leg lacks a completed new movement request')
+    need(end['travel']>150 and math.dist(start['root'][:2],end['root'][:2])>150,'second leg lacks actual net displacement')
+    need(end['attention']==2 and saved_heading_error(end)<=2.7,'second leg did not converge on observed player')
+
+
+def verify_navigation(text,suite,exit_status=0):
+    need(exit_status==0,'navigation process exit nonzero');need(not FATAL.search(text),'fatal/assert/ensure detected')
+    need(suite in NAV_PLANS,'unknown navigation suite')
+    lines=text.splitlines();marks=[(i,nav_fields(l)) for i,l in enumerate(lines) if NAV_TAG in l]
+    count=NAV_COUNTS[suite];plans=NAV_PLANS[suite]
+    need(marks and marks[0][1]=={'status':'BEGIN','suite':suite,'map':MAP,'expected':str(count)},'navigation BEGIN mismatch')
+    need(marks[-1][1]=={'status':'SUMMARY','suite':suite,'passed':str(count),'expected':str(count),'result':'PASS'},'navigation SUMMARY mismatch')
+    need(any('Engine exit requested' in l for l in lines[marks[-1][0]+1:]),'missing clean exit')
+    need(not any('PEDRO_AWARENESS_TEST status=FAIL' in l for l in lines),'fixture failure marker')
+    expected_events=NAV_EVENTS[suite];seen_events=[];acquired=[];emitted=[];pending=None
+    event_by_step={s:(op,trace,n) for s,op,trace,n in expected_events}
+    idx=0;start=prev=None;frames=total_frames=0;travel=yawtravel=side=0.;cap=False;saved=False;reset=False;completed=[];snapshots={};transition=0;outcomes=0
+    history={};last_by_controller={};last_step=None;restore_stable=None;restore_frames=0
+    def sample_provenance(m):
+        c=m['controller'];h=history.setdefault(c,[])
+        if m['awareness']=='Perceived' and m['has'] and m['target']==m['player']:
+            h.append((m['time'],m['known']))
+            if len(h)>512:del h[:256]
+        old=last_by_controller.get(c)
+        if m['active'] and (old is None or not old['active'] or old['id']!=m['id']):
+            need(m['mode']=='FollowObserved' and m['awareness']=='Perceived','new route without fresh sight')
+            need(m['target']==m['player'] and m['sightTime']<=m['time']+1e-4 and m['planTime']-m['sightTime']<=.3501,'stale/foreign route provenance')
+            need(any(pos_equal(p,m['sighting'],1.01) and t+1e-4>=m['sightTime'] for t,p in h),'destination lacks legitimate sighting')
+            if old and old['submissions'] and m['submissions']>old['submissions'] and old['player']==m['player']:
+                need(m['submissions']==old['submissions']+1 and m['planTime']-old['planTime']>=.3498,'route submission rate or sequence invalid')
+        if old and old['active'] and m['active'] and old['id']==m['id']:
+            need(pos_equal(old['goal'],m['goal'],.01) and pos_equal(old['sighting'],m['sighting'],.01) and old['sightTime']==m['sightTime'] and old['submissions']==m['submissions'],'active fixed goal mutated')
+        if m['active'] and m['mode']=='ContinueLastKnown':need(m['now']-m['time']<2.0001,'expired active route')
+        last_by_controller[c]=m
+    # Consume event and outcome markers in their original order alongside samples.
+    for line in lines[marks[0][0]+1:marks[-1][0]]:
+        if 'PEDRO_AWARENESS_TEST status=RESET_EVIDENCE' in line:
+            need(suite=='navigation' and not reset and not emitted and start is None,'unexpected evidence reset');reset=True;continue
+        if 'PEDRO_AWARENESS_TEST status=EVENT' in line:
+            d=parse_fields(line);need(start is None and pending is None and len(seen_events)<len(expected_events),'unexpected evidence event')
+            step,op,trace,n=expected_events[len(seen_events)]
+            need(idx<len(plans) and plans[idx][1]==step and d['opportunity']==op and d['expected']==trace and int(d['inspection'])==n,'event timing/identity mismatch')
+            eid=ids(d['id'])[0];need(eid not in emitted,'duplicate event identity');emitted.append(eid)
+            if trace=='Visible':acquired.append(eid)
+            pending=step;seen_events.append({'step':step,'opportunity':op,'trace':trace,'id':eid});continue
+        if 'PEDRO_OUTCOME ' in line:
+            need(suite=='navigation-integration' and start and start['step']=='SavedLanternSeeking' and not outcomes and not transition and 'policy=EvidenceDriven interpretation=Seeking sampledCore=3 requiredCore=3 resolved=yes actualLOS=checked' in line,'unexpected outcome');outcomes+=1;continue
+        if NAV_TAG not in line:continue
+        d=nav_fields(line);kind=d.get('status')
+        if kind=='CAPABILITY':
+            need(not cap and suite!='navigation-integration' and start and start['step']=='DisabledWithNavmesh' and set(d)=={'status','dynamic','connected','disconnected','start','end','island','length'},'unexpected capability marker')
+            need(all(d[x]=='yes' for x in ('dynamic','connected','disconnected')) and math.isfinite(float(d['length'])) and float(d['length'])>=600 and math.dist(vec(d['start']),vec(d['end']))>=600 and math.dist(vec(d['end']),vec(d['island']))>=1000,'navigation capability failed');cap=True;continue
+        if kind=='SAVED_READY':
+            need(not saved and suite=='navigation-integration' and start and start['step']=='SavedConfigurationAndNavmesh' and set(d)=={'status','original','dynamic','projected'} and d['original']==d['dynamic']=='yes','saved configuration not proved');vec(d['projected']);saved=True;continue
+        need(kind in ('STEP_BEGIN','FRAME','PASS','CHECK'),'unexpected navigation marker')
+        need(idx<len(plans) and (d.get('case'),d.get('step'))==plans[idx],'navigation case order mismatch')
+        case,step=plans[idx]
+        try:
+            if suite=='navigation' and step=='PlayerReplacement':
+                m=nav_sample(d,replacement_prior=last_step,replacement_start=start,replacement_prev=prev)
+            else:
+                m=nav_sample(d)
+        except (ValueError,KeyError,TypeError) as exc:
+            raise ValueError(f'{case} {step} {kind}: {exc}') from exc
+        need(m['emitted']==emitted and m['acquired']==acquired and m['evidence']==len(acquired) and m['sampled']==len(acquired),'event history differs')
+        if step!='SavedLanternSeeking':need(not m['final'] and m['progress']==0,'premature completion')
+        if kind=='STEP_BEGIN':
+            need(start is None and m['dt']==0 and m['travel']==0 and m['yawTravel']==0 and m['maxSide']==0 and pos_equal(m['root'],m['start'],.01),'invalid step begin')
+            need((pending==step)==(step in event_by_step),'missing event before step');pending=None
+            if step=='SavedLanternSeeking':need(not m['final'] and m['progress']==0,'premature K06 completion')
+            if suite=='navigation-integration' and step not in ('SavedConfigurationAndNavmesh','SavedAutonomousFollow'):verify_saved_continuity(last_step,m)
+            start=prev=m;frames=0;travel=yawtravel=side=0.
+            if step=='SavedRestoreSightNoReplay':
+                restore_stable=None;restore_frames=0;verify_saved_restore_sample(start,m)
+            # Fixture may reposition player/controller between steps; a cached prior
+            # observation at STEP_BEGIN is intentionally not treated as new sight.
+            if m['controller'] not in last_by_controller or not m['active']:
+                sample_provenance(m)
+            continue
+        need(start is not None and prev is not None,'frame without begin')
+        need(pos_equal(start['start'],m['start'],.01) and pos_equal(start['rel'],m['rel'],.01) and pos_equal(start['relRot'],m['relRot'],.01),'eye relative transform changed')
+        need(abs(m['root'][2]-start['root'][2])<=12.01,'unexpected vertical motion')
+        if step=='SavedRestoreSightNoReplay':
+            verify_saved_restore_sample(start,m)
+            if kind=='FRAME':
+                if saved_restore_ready(start,m):
+                    if restore_stable is None:restore_stable=m['now']
+                    restore_frames+=1
+                else:restore_stable=None;restore_frames=0
+            else:
+                need(saved_restore_ready(start,m) and restore_stable is not None and restore_frames>=4 and m['now']-restore_stable>=.24998,'saved sight restoration lacks stable fresh perception')
+        if step=='SavedLanternSeeking':
+            if m['final'] and not prev['final']:
+                need(outcomes==1 and not transition and m['progress']==1 and kind=='FRAME','invalid deferred completion');transition=1
+            if prev['final']:need(m['final'] and m['progress']==1,'reversed completion')
+        if kind=='FRAME':
+            if step in ('SavedAutonomousFollow','SavedRelocationNoReplay'):need(pos_equal(start['actual'],m['actual'],.01) and start['controller']==m['controller'] and start['player']==m['player'],'saved follow target or controller changed during test')
+            if step in ('ContinueFixedRoute','HiddenMoveNoRetarget','ExpiredStops','DemoLoseSight','DemoHiddenEvent','DemoStopNoEvidence','StationaryLoss'):
+                need(pos_equal(m['known'],start['known'],.01) and m['time']==start['time'] and m['submissions']==start['submissions'],'hidden memory or request count changed within step')
+                if step in ('HiddenMoveNoRetarget','ExpiredStops','DemoHiddenEvent','DemoStopNoEvidence'):
+                    need(last_step and m['time']==last_step['time'] and pos_equal(m['known'],last_step['known'],.01),'hidden memory changed across steps')
+            dt=m['now']-prev['now'];need(dt>0 and abs(dt-m['dt'])<.00002,'invalid frame clock')
+            dist=math.dist(m['root'][:2],prev['root'][:2]);yaw=abs((m['body'][1]-prev['body'][1]+180)%360-180)
+            need(dist<=190*dt+.505,'excess measured displacement');need(yaw<=90*min(dt,.1)+.805,'excess measured yaw')
+            if m['attention']==0:need(yaw<=.105,'movement changed yaw without attention')
+            if step=='IndependentRoutes' and m['otherId'] and prev['otherId']:
+                need(m['otherId']!=m['id'] and math.dist(m['otherRoot'][:2],prev['otherRoot'][:2])<=190*dt+.505,'second observer invalid movement or shared ID')
+            if step=='NativeDetour':
+                x,y=m['root'][0]-100000,m['root'][1]-100000
+                need(math.hypot(x-min(max(x,210),290),y-min(max(y,680),1120))>=30,'observer crosses physical detour blocker')
+            # Acceleration limit applies when increasing speed on one owned route;
+            # explicit cancellation is allowed to brake instantly.
+            if step=='SpeedAndBraking' and m['active'] and prev['active'] and m['id']==prev['id']:
+                a=math.hypot(*m['velocity'][:2])-math.hypot(*prev['velocity'][:2]);need(a<=500*dt+4,'excess acceleration')
+            travel+=dist;yawtravel+=yaw;side=max(side,abs(m['root'][1]-start['root'][1]));frames+=1;total_frames+=1
+            need(abs(travel-m['travel'])<=.06+frames*.002 and abs(yawtravel-m['yawTravel'])<=.06+frames*.00001 and abs(side-m['maxSide'])<.01,'reported movement totals inconsistent')
+            sample_provenance(m);prev=m;continue
+        need(kind==('CHECK' if case=='-' else 'PASS') and frames>=4 and m['dt']==0 and abs(m['now']-prev['now'])<.00002 and pos_equal(m['root'],prev['root'],.01),'incomplete navigation frame chain')
+        need(abs(m['travel']-prev['travel'])<.002 and abs(m['yawTravel']-prev['yawTravel'])<.002 and m['active']==prev['active'] and m['id']==prev['id'],'completion differs from last frame')
+        def stopped():return not m['active'] and math.hypot(*m['velocity'][:2])<1.01
+        def following():return m['active'] and m['mode']=='FollowObserved' and m['awareness']=='Perceived'
+        def seen():return m['awareness']=='Perceived' and m['has'] and m['target']==m['player'] and pos_equal(m['known'],m['actual'],1.01)
+        if step=='DisabledWithNavmesh':need(cap and m['mode']=='Disabled' and stopped() and seen() and m['travel']<2,'disabled control or capability failed')
+        if step in ('InitiallyHidden','PlayerReplacement','UnpossessStops','DestroyControllerStops'):need(stopped() and m['awareness']=='Unaware','lifecycle/hidden observer did not stop')
+        if step in ('WithinBand','HysteresisIdle','BeforeStationaryLoss','DisabledStopsAndRestores'):need(stopped() and seen() and m['travel']<2,'stationary condition failed')
+        if step in ('WithinBand','InitiallyHidden','StationaryLoss'):need(m['submissions']==0,'unexpected request')
+        if step in ('NativeFollow','ApproachWhileMoving','BeforeReplan','BeforeFollowingLoss','BeforeDisable','ReenableFresh','BeforeUnpossess','RepossessMoves','IndependentRoutes','AttentionWhileWalking','DemoResumeMovement'):need(following() and seen() and m['travel']>30,'native locomotion not demonstrated')
+        if step=='NativeFollow':need(m['travel']>80,'probe lacks real movement')
+        if step in ('StandoffArrival','SpeedAndBraking','NativeDetour','DemoRelocate','SavedAutonomousFollow','SavedRelocationNoReplay','DemoReacquireNoReplay'):
+            need(stopped() and seen() and 250<=math.dist(m['root'][:2],m['known'][:2])<=505,'invalid stand-off arrival')
+        if step=='SpeedAndBraking':need(m['travel']>600,'insufficient speed/braking exercise')
+        if step=='NativeDetour':need(m['travel']>750 and m['maxSide']>230,'detour not demonstrated')
+        if step=='PlayerApproaches':need(stopped() and seen() and m['travel']<50,'failed to cancel near player')
+        if step in ('NoNavigableStart','DisconnectedRoute'):need(stopped() and m['mode']=='Blocked' and m['submissions']==0 and m['travel']<2,'unreachable path accepted')
+        if step=='PhysicalStall':need(stopped() and m['mode']=='Blocked' and m['submissions']>0 and m['root'][0]<100110,'physical stall not aborted')
+        if step=='OffmeshGoal':need((stopped() and m['mode']=='Blocked') or (following() and m['goal'][0]<101500),'unsafe offmesh goal')
+        if step=='RetryAfterBlockCleared':need(following() and m['submissions']>1 and m['root'][0]>100200,'no successful retry')
+        if step in ('ReplanVisible','RateFirst','RateSecond','BoundedReplanning','ReacquireNewRoute'):need(following() and last_step is not None and m['submissions']==last_step['submissions']+1,'replanning missing or duplicated')
+        if step=='SmallMovementRetained':need(following() and last_step and m['id']==last_step['id'] and m['submissions']==last_step['submissions'],'unnecessary replan')
+        if step in ('ContinueFixedRoute','HiddenMoveNoRetarget','ExpiredStops','DemoLoseSight','DemoHiddenEvent','DemoStopNoEvidence'):
+            reference=snapshots['BeforeFollowingLoss'] if step in ('ContinueFixedRoute','HiddenMoveNoRetarget','ExpiredStops') else snapshots['DemoResumeMovement']
+            need(m['awareness']=='LostSight' and pos_equal(m['known'],reference['known'],1.01) and m['time']+1e-4>=reference['time'] and m['submissions']==reference['submissions'],'hidden movement changed memory or request count')
+            for q in (start,m):
+                if q['active']:need(q['id']==reference['id'] and pos_equal(q['goal'],reference['goal'],.01),'hidden route redirected')
+            if step in ('ContinueFixedRoute','HiddenMoveNoRetarget'):need(m['active'] and m['mode']=='ContinueLastKnown' and m['travel']>10,'did not continue fixed route')
+            if step in ('ExpiredStops','DemoStopNoEvidence'):need(stopped() and m['now']-m['time']>=1.9999,'expired route not stopped')
+        if step=='StationaryLoss':need(stopped() and m['awareness']=='LostSight','stationary sight loss moved')
+        if step=='HiddenMoveNoRetarget':need(not pos_equal(m['actual'],m['known'],50),'hidden movement not demonstrated')
+        if step=='IndependentRoutes':need(m['otherId'] and m['otherId']!=m['id'] and m['otherRoot'][0]>100070,'second route missing')
+        if step=='AttentionWhileWalking':need(m['yawTravel']>20 and m['attention']==2 and m['travel']>120,'simultaneous movement and attention not proved')
+        if step=='DemoRelocate':need(m['travel']>550,'physical relocation not demonstrated')
+        if step=='SavedConfigurationAndNavmesh':need(saved and stopped() and m['evidence']==0,'saved-map preconditions not proved')
+        if step=='SavedAutonomousFollow':verify_saved_follow(start,m)
+        if step=='SavedRelocationNoReplay':verify_saved_relocation(start,m)
+        if step=='SavedLanternSeeking':need(m['final'] and m['progress']==1 and transition==1 and outcomes==1,'missing deferred resolution')
+        snapshots[step]=m;last_step=m;idx+=1;start=prev=None
+        if case!='-':completed.append(case)
+    need(idx==len(plans) and start is None and len(completed)==count and len(set(completed))==count,'incomplete navigation case sequence')
+    need(len(seen_events)==len(expected_events) and pending is None and reset==(suite=='navigation'),'incomplete navigation events')
+    need((cap and not saved) if suite!='navigation-integration' else (saved and not cap),'missing navigation capability')
+    need(outcomes==transition==int(suite=='navigation-integration'),'resolution count differs')
+    statuses=[l for l in lines if 'PEDRO_DIRECT status=' in l];direct=[l for l in lines if 'PEDRO_DIRECT acquired=yes' in l]
+    need(len(statuses)==len(seen_events) and len(direct)==len(acquired) and all('provenance=DirectObservation' in l for l in direct),'director log does not match acquired events')
+    for l,e in zip(statuses,seen_events):need(f'status={e["trace"]} ' in l and f'opportunity={e["opportunity"]} ' in l and 'actualLOS=checked' in l,'director trace mismatch')
+    return {'status':'PASS','suite':suite,'expected':count,'cases':completed,'frames':total_frames,'events':seen_events,'steps':snapshots,'resolution':transition}
+
+
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('suite',choices=['native','world','integration','unity','non-unity','attention','attention-integration']);p.add_argument('input',type=Path);p.add_argument('exit_status',type=int);p.add_argument('output',type=Path)
+    p=argparse.ArgumentParser(); p.add_argument('suite',choices=['native','world','integration','unity','non-unity','attention','attention-integration','navigation','navigation-integration','navigation-probe']);p.add_argument('input',type=Path);p.add_argument('exit_status',type=int);p.add_argument('output',type=Path)
     p.add_argument('--project',type=Path)
     a=p.parse_args()
     try:
@@ -539,6 +901,8 @@ def main():
             result=verify_unity(text,a.project,a.exit_status)
         elif a.suite=='non-unity':
             result=verify_non_unity(text,a.exit_status)
+        elif a.suite in NAV_PLANS:
+            result=verify_navigation(text,a.suite,a.exit_status)
         elif a.suite in ATT_PLANS:
             result=verify_attention(text,a.suite,a.exit_status)
         else:

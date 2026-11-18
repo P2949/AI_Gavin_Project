@@ -12,7 +12,7 @@ import b2b6a_audit as audit
 
 def native_report():
     return dict(tests=[dict(fullTestPath=n,state='Success',warnings=0,errors=0) for n in sorted(v.NATIVE_NAMES)],
-                succeeded=101,succeededWithWarnings=0,failed=0,notRun=0,inProcess=0)
+                succeeded=125,succeededWithWarnings=0,failed=0,notRun=0,inProcess=0)
 
 
 def example_log(suite):
@@ -56,7 +56,7 @@ def example_log(suite):
     return '\n'.join(rows)+'\n'
 
 class NativeTests(unittest.TestCase):
-    def test_valid(self): self.assertEqual(v.native(native_report())['total'],101)
+    def test_valid(self): self.assertEqual(v.native(native_report())['total'],125)
     def test_missing(self):
         r=native_report();r['tests'].pop()
         with self.assertRaises(ValueError): v.native(r)
@@ -73,11 +73,11 @@ class NativeTests(unittest.TestCase):
         r=native_report();r['notRun']=1
         with self.assertRaises(ValueError):v.native(r)
     def test_process_failure(self):
-        with self.assertRaisesRegex(ValueError,'all 101 native tests passed, but native process exit 1'):v.native(native_report(),1)
+        with self.assertRaisesRegex(ValueError,'all 125 native tests passed, but native process exit 1'):v.native(native_report(),1)
     def test_process_failure_diagnostics(self):
         text=v.native_diagnostics(native_report(),1)
         self.assertIn('Native process exit: 1',text)
-        self.assertIn('"succeeded": 101',text)
+        self.assertIn('"succeeded": 125',text)
         self.assertNotIn('Native test diagnostic:',text)
     def test_failed_assertion_diagnostics(self):
         report=native_report();report['tests'][0].update(state='Fail',errors=1,entries=[{'event':{'message':'actual assertion'}}])
@@ -191,7 +191,7 @@ class UnityTests(unittest.TestCase):
     def write(self,blob,sources):
         blob.write_text(''.join(f'#include "{self.project/name}"\n' for name in sources))
     def verify(self,log=None,rc=0):return v.verify_unity(self.log if log is None else log,self.project,rc)
-    def test_unity_valid(self):self.assertEqual(len(self.verify()['source_membership']),6)
+    def test_unity_valid(self):self.assertEqual(len(self.verify()['source_membership']),8)
     def test_unity_split(self):
         self.write(self.blob,v.UNITY_SOURCES[:2]);self.write(self.dir/'Module.AI_Gavin_Project.2.cpp',v.UNITY_SOURCES[2:])
         self.assertEqual(len(self.verify(self.log.replace('[2/2] Link','[2/3] Compile [x64] Module.AI_Gavin_Project.2.cpp\n[3/3] Link'))['compiled_blobs']),2)
@@ -401,8 +401,8 @@ class AttentionReportTests(unittest.TestCase):
 
 class NonUnityTests(unittest.TestCase):
     def setUp(self):
-        self.log='Running command : UBT -DisableUnity -DisableAdaptiveUnity -gather\n'+''.join(f'[{i+1}/7] Compile {Path(s).name}\n' for i,s in enumerate(v.UNITY_SOURCES))+'[7/7] Link libUnrealEditor-AI_Gavin_Project.so\nResult: Succeeded\n'
-    def test_valid(self):self.assertEqual(v.verify_non_unity(self.log,0)['expected'],6)
+        self.log='Running command : UBT -DisableUnity -DisableAdaptiveUnity -gather\n'+''.join(f'[{i+1}/9] Compile {Path(s).name}\n' for i,s in enumerate(v.UNITY_SOURCES))+'[9/9] Link libUnrealEditor-AI_Gavin_Project.so\nResult: Succeeded\n'
+    def test_valid(self):self.assertEqual(v.verify_non_unity(self.log,0)['expected'],8)
     def test_missing_source(self):
         with self.assertRaises(ValueError):v.verify_non_unity(self.log.replace('Compile PedroAttentionPolicy.cpp','Mention PedroAttentionPolicy.cpp'),0)
     def test_unity_contamination(self):
@@ -450,5 +450,234 @@ class EngineUnityFlagTests(unittest.TestCase):
         self.rules.write_text(self.rules.read_text().replace('-ForceUnity','-Unrelated'))
         with self.assertRaisesRegex(ValueError,'-ForceUnity'):audit.inspect_unity_flags(self.engine)
 
+
+
+def navigation_example(suite='navigation-probe'):
+    """Synthetic log to validate the checker, not proof of Unreal execution."""
+    from math import hypot,cos,sin,radians
+    saved=suite=='navigation-integration'
+    rows=[v.NAV_TAG+f'status=BEGIN suite={suite} map={v.MAP} expected={v.NAV_COUNTS[suite]}']
+    emitted=[];acquired=[];now=1.;x=-900. if saved else 100000.;y=0. if saved else 100000.;z=90. if saved else 5000.
+    yaw=0.;controller='None' if saved else 'Controller1';submissions=0;rid=0;player=x+900;plan=-1.;sight=0.;route_point=0.;goal=0.;travel=0.;yawtravel=0.;final=False
+    events={n:(op,trace,ins) for n,op,trace,ins in v.NAV_EVENTS[suite]}
+    def serial(k,val):
+        if isinstance(val,bool):return 'yes' if val else 'no'
+        if isinstance(val,(tuple,list)):
+            if k in ('emitted','acquired'):return ','.join(val) or '-'
+            return ','.join(f'{n:.6f}' for n in val)
+        if isinstance(val,float):return f'{val:.6f}'
+        return str(val)
+    def line(status,case,step,dt,active,seen,root_start,velocity=0.,lost=False):
+        running=controller not in ('None','Controller1')
+        mode='FollowObserved' if active else ('Idle' if running else 'Disabled')
+        fields=dict(status=status,case=case,step=step,now=now,dt=dt,root=(x,y,z),start=(root_start,y,z),velocity=(velocity,0,0),body=(0,yaw,0),eye=(x,y,z+64),forward=(cos(radians(yaw)),sin(radians(yaw)),0),rel=(0,0,64),relRot=(0,0,0),travel=travel,yawTravel=yawtravel,maxSide=0.,mode=mode,reason=5 if active else 2,running=running,attention=2 if saved and running else 0,active=active,id=rid if active else 0,valid=active,goal=(goal,y,z-88) if active else (0,0,0),sighting=(route_point,y,z) if sight else (0,0,0),sightTime=sight,planTime=plan,length=350. if active else 0.,submissions=submissions,controller=controller,speedLimit=180. if running else 600.,accel=500. if running else 2048.,brake=600. if running else 2048.,accelPaths=running,awareness='Perceived' if seen else 'Unaware',has=seen,known=(player,y,z) if seen else (0,0,0),actual=(player,y,z),time=now if seen else 0.,target='Player' if seen else 'None',player='Player',grounded=True,evidence=len(acquired),sampled=len(acquired),emitted=emitted,acquired=acquired,final=final,progress=int(final),otherId=0,otherRoot=(0,0,0))
+        if lost:
+            fields.update(awareness='LostSight',has=True,known=(player,y,z),target='Player',attention=3,time=last_clear)
+        return v.NAV_TAG+' '.join(f'{k}={serial(k,w)}' for k,w in fields.items())
+    last_clear=0.
+    for case,step in v.NAV_PLANS[suite]:
+        if step in events:
+            op,trace,ins=events[step];eid=f'{len(emitted)+1:032x}';emitted.append(eid)
+            rows.append(f'PEDRO_DIRECT status={trace} opportunity={op} actualLOS=checked')
+            if trace=='Visible':acquired.append(eid);rows.append(f'PEDRO_DIRECT acquired=yes opportunity={op} provenance=DirectObservation')
+            rows.append(v.TAG+f'status=EVENT id={eid} subject={op} opportunity={op} expected={trace} inspection={ins}')
+        moving=step in ('NativeFollow','SavedAutonomousFollow','SavedRelocationNoReplay')
+        if moving:
+            controller='Controller2';player=x+(1200 if not saved else 800.)
+        if step=='SavedAutonomousFollow':yaw=-25.
+        seen=step!='SavedConfigurationAndNavmesh'
+        if step=='NativeFollow':seen=False
+        start=x;travel=0.;yawtravel=0.;active=False
+        now+=.1;rows.append(line('STEP_BEGIN',case,step,0.,False,seen,start,lost=step in ('SavedRadioOccluded','SavedRestoreSightNoReplay')))
+        if step=='DisabledWithNavmesh':rows.append(v.NAV_TAG+'status=CAPABILITY dynamic=yes connected=yes disconnected=yes start=100000,100000,4912 end=100700,100000,4912 island=102100,100000,4912 length=700')
+        if step=='SavedConfigurationAndNavmesh':rows.append(v.NAV_TAG+'status=SAVED_READY original=yes dynamic=yes projected=-900,0,0')
+        n=7 if step in ('NativeFollow','SavedRestoreSightNoReplay') else 22 if moving else 5
+        for i in range(n):
+            now+=.1
+            if moving and i==0:
+                submissions+=1;rid=100+submissions;plan=now;sight=now;route_point=player;goal=player-450
+            if moving and (not saved or i<18):
+                active=True;x+=18.;travel+=18.;velocity=180.
+                if step=='SavedAutonomousFollow' and i<5:yaw+=5.;yawtravel+=5.
+            else:active=False;velocity=0.
+            if step=='SavedLanternSeeking' and i==1:
+                rows.append('PEDRO_OUTCOME policy=EvidenceDriven interpretation=Seeking sampledCore=3 requiredCore=3 resolved=yes actualLOS=checked');final=True
+            lost=step=='SavedRadioOccluded' or (step=='SavedRestoreSightNoReplay' and i<2)
+            rows.append(line('FRAME',case,step,.1,active,step!='SavedConfigurationAndNavmesh',start,velocity,lost=lost))
+            if not lost:last_clear=now
+        rows.append(line('CHECK' if case=='-' else 'PASS',case,step,0.,active,step!='SavedConfigurationAndNavmesh',start,velocity,lost=step=='SavedRadioOccluded'))
+    rows.append(v.NAV_TAG+f'status=SUMMARY suite={suite} passed={v.NAV_COUNTS[suite]} expected={v.NAV_COUNTS[suite]} result=PASS')
+    rows.append('LogCore: Engine exit requested (reason: GenericPlatform RequestExit)')
+    return '\n'.join(rows)+'\n'
+
+class NavigationReportTests(unittest.TestCase):
+    def verify(self,text=None,suite='navigation-probe',rc=0):return v.verify_navigation(navigation_example(suite) if text is None else text,suite,rc)
+    def alter(self,key,value,step='NativeFollow',index=0,suite='navigation-probe',status='FRAME'):
+        import re
+        rows=navigation_example(suite).splitlines();matches=[i for i,l in enumerate(rows) if v.NAV_TAG+f'status={status} ' in l and f' step={step} ' in l];p=matches[index]
+        rows[p]=re.sub(r'(?<!\S)'+re.escape(key)+'=[^ ]+',key+'='+str(value),rows[p]);return '\n'.join(rows)+'\n'
+    def reject(self,text,suite='navigation-probe'):
+        with self.assertRaises((ValueError,KeyError)):self.verify(text,suite)
+    def test_valid_probe(self):self.assertEqual(self.verify()['cases'],['N01','N04'])
+    def test_valid_saved(self):self.assertEqual(self.verify(suite='navigation-integration')['resolution'],1)
+    def test_missing_case(self):self.reject(navigation_example().replace('case=N04','case=N05'))
+    def test_duplicate_frame(self):
+        t=navigation_example();row=next(l for l in t.splitlines() if 'status=FRAME case=N04' in l);self.reject(t.replace(row,row+'\n'+row,1))
+    def test_missing_frame(self):
+        t=navigation_example();row=next(l for l in t.splitlines() if 'status=FRAME case=N04' in l);self.reject(t.replace(row+'\n','',1))
+    def test_nonfinite(self):self.reject(self.alter('now','nan'))
+    def test_speed(self):self.reject(self.alter('velocity','181,181,0'))
+    def test_displacement(self):self.reject(self.alter('root','101000,100000,5000'))
+    def test_unowned_yaw(self):self.reject(self.alter('body','0,40,0'))
+    def test_eye_relative_change(self):self.reject(self.alter('rel','0,50,64'))
+    def test_invalid_path(self):self.reject(self.alter('valid','no'))
+    def test_excessive_path(self):self.reject(self.alter('length','2201'))
+    def test_standoff(self):self.reject(self.alter('goal','101200,100000,4912'))
+    def test_stale_provenance(self):self.reject(self.alter('sightTime','0.1'))
+    def test_hidden_new_route(self):self.reject(self.alter('awareness','LostSight'))
+    def test_fixed_goal_mutation(self):self.reject(self.alter('goal','100760,100000,4912',index=1))
+    def test_hidden_position_goal(self):
+        text=self.alter('sighting','101100,100100,5000')
+        rows=text.splitlines();i=next(i for i,l in enumerate(rows) if 'status=FRAME case=N04' in l)
+        import re
+        rows[i]=re.sub(r'(?<!\S)goal=[^ ]+','goal=100650,100100,4912',rows[i])
+        self.reject('\n'.join(rows)+'\n')
+    def test_orphan_request(self):self.reject(self.alter('active','no'))
+    def test_invalid_rate(self):
+        import re
+        rows=navigation_example().splitlines();matches=[i for i,l in enumerate(rows) if 'status=FRAME case=N04' in l];i=matches[1]
+        for k,val in [('id','102'),('submissions','2')]:rows[i]=re.sub(r'(?<!\S)'+k+'=[^ ]+',k+'='+val,rows[i])
+        self.reject('\n'.join(rows)+'\n')
+    def test_wrong_event(self):self.reject(navigation_example('navigation-integration').replace('opportunity=Inspect_Radio','opportunity=Inspect_Wrong',1),'navigation-integration')
+    def test_missing_event(self):
+        t=navigation_example('navigation-integration');row=next(l for l in t.splitlines() if 'status=EVENT' in l);self.reject(t.replace(row+'\n','',1),'navigation-integration')
+    def test_premature_completion(self):self.reject(self.alter('final','yes',step='SavedLanternSeeking',suite='navigation-integration',status='STEP_BEGIN'),'navigation-integration')
+    def test_missing_outcome(self):
+        t=navigation_example('navigation-integration');row=next(l for l in t.splitlines() if 'PEDRO_OUTCOME ' in l);self.reject(t.replace(row+'\n','',1),'navigation-integration')
+    def test_process_and_fatal(self):
+        with self.assertRaises(ValueError):self.verify(rc=1)
+        self.reject(navigation_example()+'Fatal error: simulated\n')
+
+
+
+class NavigationReplacementTests(unittest.TestCase):
+    # Actual compact endpoint records from the successful UE navigation run.
+    # Intermediate frames below are synthetic, not an Unreal replay.
+    def setUp(self):
+        self.prior=v.nav_sample(v.nav_fields(v.NAV_TAG+'status=PASS case=N23 step=ReenableFresh now=30.237866 dt=0.000000 root=100116.840,100000.000,5002.150 start=100071.992,100000.000,5002.150 velocity=180.000,0.000,0.000 body=0.000000,0.000000,-0.000000 eye=100116.840,100000.000,5066.150 forward=1.000,0.000,0.000 rel=0.000,0.000,64.000 relRot=0.000000,0.000000,0.000000 travel=44.849 yawTravel=0.000 maxSide=0.000 mode=FollowObserved reason=5 running=yes attention=0 active=yes id=16 valid=yes goal=100850.000,100000.000,4920.000 sighting=101300.000,100000.000,5000.000 sightTime=29.787857 planTime=29.812858 length=778.008 submissions=1 controller=PedroObserverAIController_14 speedLimit=180.000 accel=500.000 brake=600.000 accelPaths=yes awareness=Perceived has=yes known=101300.000,100000.000,5000.000 actual=101300.000,100000.000,5000.000 time=30.187865 target=BP_MainPlayerCharacter_C_0 player=BP_MainPlayerCharacter_C_0 grounded=yes evidence=0 sampled=0 emitted=- acquired=- final=no progress=0 otherId=0 otherRoot=0.000,0.000,0.000'))
+        self.begin_raw=v.nav_fields(v.NAV_TAG+'status=STEP_BEGIN case=N24 step=PlayerReplacement now=30.246200 dt=0.000000 root=100118.341,100000.000,5002.150 start=100118.341,100000.000,5002.150 velocity=180.000,0.000,0.000 body=0.000000,0.000000,-0.000000 eye=100118.341,100000.000,5066.150 forward=1.000,0.000,0.000 rel=0.000,0.000,64.000 relRot=0.000000,0.000000,0.000000 travel=0.000 yawTravel=0.000 maxSide=0.000 mode=FollowObserved reason=5 running=yes attention=0 active=yes id=16 valid=yes goal=100850.000,100000.000,4920.000 sighting=101300.000,100000.000,5000.000 sightTime=29.787857 planTime=29.812858 length=778.008 submissions=1 controller=PedroObserverAIController_14 speedLimit=180.000 accel=500.000 brake=600.000 accelPaths=yes awareness=Perceived has=yes known=101300.000,100000.000,5000.000 actual=99418.341,100000.000,5002.150 time=30.187865 target=None player=PedroObserverCharacter_1 grounded=yes evidence=0 sampled=0 emitted=- acquired=- final=no progress=0 otherId=0 otherRoot=0.000,0.000,0.000')
+        self.end_raw=v.nav_fields(v.NAV_TAG+'status=PASS case=N24 step=PlayerReplacement now=30.687876 dt=0.000000 root=100118.375,100000.000,5002.150 start=100118.341,100000.000,5002.150 velocity=0.000,0.000,0.000 body=0.000000,0.000000,-0.000000 eye=100118.375,100000.000,5066.150 forward=1.000,0.000,0.000 rel=0.000,0.000,64.000 relRot=0.000000,0.000000,0.000000 travel=0.035 yawTravel=0.000 maxSide=0.000 mode=Idle reason=2 running=yes attention=0 active=no id=0 valid=no goal=0.000,0.000,0.000 sighting=0.000,0.000,0.000 sightTime=0.000000 planTime=-1.000000 length=0.000 submissions=1 controller=PedroObserverAIController_14 speedLimit=180.000 accel=500.000 brake=600.000 accelPaths=yes awareness=Unaware has=no known=0.000,0.000,0.000 actual=99418.341,100000.000,5002.150 time=0.000000 target=None player=PedroObserverCharacter_1 grounded=yes evidence=0 sampled=0 emitted=- acquired=- final=no progress=0 otherId=0 otherRoot=0.000,0.000,0.000')
+        self.begin=v.nav_sample(self.begin_raw,replacement_prior=self.prior)
+    def frame(self,**changes):
+        d=dict(self.end_raw,status='FRAME',now=f"{self.begin['now']+.05:.6f}",dt='0.05')
+        d.update(changes);return d
+    def sample(self,d,prev=None):
+        return v.nav_sample(d,replacement_prior=self.prior,replacement_start=self.begin,replacement_prev=self.begin if prev is None else prev)
+    def test_recorded_replacement_begin_and_pass(self):
+        clean=self.sample(self.frame())
+        self.assertEqual(self.sample(self.end_raw,clean)['awareness'],'Unaware')
+    def test_stale_snapshot_while_route_cancelled_then_clear(self):
+        stale=self.sample(self.frame(awareness='Perceived',has='yes',known=self.begin_raw['known'],time=self.begin_raw['time']))
+        self.assertFalse(stale['active']);self.assertEqual(self.sample(self.frame(),stale)['awareness'],'Unaware')
+    def test_ordinary_sample_stays_strict(self):
+        with self.assertRaisesRegex(ValueError,'missing spatial memory'):v.nav_sample(self.begin_raw)
+    def test_begin_cannot_change_route(self):
+        with self.assertRaisesRegex(ValueError,'changed old owned route'):v.nav_sample(dict(self.begin_raw,id='999'),replacement_prior=self.prior)
+    def test_begin_requires_new_identity(self):
+        with self.assertRaisesRegex(ValueError,'identity'):v.nav_sample(dict(self.begin_raw,player=self.prior['player']),replacement_prior=self.prior)
+    def test_retained_route_after_setup(self):
+        with self.assertRaisesRegex(ValueError,'retained or issued'):self.sample(dict(self.begin_raw,status='FRAME',now=str(self.begin['now']+.01),dt='0.01'))
+    def test_new_submission_after_setup(self):
+        with self.assertRaisesRegex(ValueError,'submission count'):self.sample(self.frame(submissions='2'))
+    def test_mutated_stale_memory(self):
+        with self.assertRaisesRegex(ValueError,'changed memory'):self.sample(self.frame(awareness='Perceived',has='yes',known='100000,0,0',time=self.begin_raw['time']))
+    def test_mutated_stale_time(self):
+        with self.assertRaisesRegex(ValueError,'timestamp changed'):self.sample(self.frame(awareness='Perceived',has='yes',known=self.begin_raw['known'],time=str(self.begin['time']+.01)))
+    def test_expired_refresh_window(self):
+        with self.assertRaisesRegex(ValueError,'bounded refresh window'):self.sample(self.frame(awareness='Perceived',has='yes',known=self.begin_raw['known'],time=self.begin_raw['time'],now=str(self.begin['now']+.25)))
+    def test_no_resurrection_after_clear(self):
+        clean=self.sample(self.frame())
+        with self.assertRaisesRegex(ValueError,'bounded refresh window'):self.sample(self.frame(awareness='Perceived',has='yes',known=self.begin_raw['known'],time=self.begin_raw['time']),clean)
+    def test_no_stale_pass(self):
+        with self.assertRaisesRegex(ValueError,'bounded refresh window'):self.sample(dict(self.end_raw,awareness='Perceived',has='yes',known=self.begin_raw['known'],time=self.begin_raw['time']))
+
+
+
+class SavedNavigationHeadingTests(unittest.TestCase):
+    def setUp(self):
+        rows=navigation_example('navigation-integration').splitlines()
+        self.start=v.nav_sample(v.nav_fields(next(l for l in rows if 'status=STEP_BEGIN case=K02' in l)))
+        self.end=v.nav_sample(v.nav_fields(next(l for l in rows if 'status=PASS case=K02' in l)))
+    def test_real_failed_straight_route(self):
+        start=v.nav_sample(v.nav_fields(v.NAV_TAG+'status=STEP_BEGIN case=K02 step=SavedAutonomousFollow now=0.288879 dt=0.000000 root=-935.211,0.000,89.650 start=-935.211,0.000,89.650 velocity=0.000,0.000,0.000 body=0.000000,0.000000,-0.000000 eye=-935.211,0.000,153.650 forward=0.919,0.000,-0.394 rel=0.000,0.000,64.000 relRot=-23.198591,0.000000,-0.000000 travel=0.000 yawTravel=0.000 maxSide=0.000 mode=Idle reason=2 running=yes attention=1 active=no id=0 valid=no goal=0.000,0.000,0.000 sighting=0.000,0.000,0.000 sightTime=0.000000 planTime=-1.000000 length=0.000 submissions=0 controller=PedroObserverAIController_0 speedLimit=180.000 accel=500.000 brake=600.000 accelPaths=yes awareness=Unaware has=no known=0.000,0.000,0.000 actual=-135.211,0.000,90.000 time=0.000000 target=None player=BP_MainPlayerCharacter_C_0 grounded=yes evidence=0 sampled=0 emitted=- acquired=- final=no progress=0 otherId=0 otherRoot=0.000,0.000,0.000'))
+        end=v.nav_sample(v.nav_fields(v.NAV_TAG+'status=DIAGNOSTIC case=K02 step=SavedAutonomousFollow now=35.290206 dt=0.000000 root=-633.811,0.000,89.650 start=-935.211,0.000,89.650 velocity=0.000,0.000,0.000 body=0.000000,0.000000,-0.000000 eye=-633.811,0.000,153.650 forward=0.919,0.000,-0.394 rel=0.000,0.000,64.000 relRot=-23.198591,0.000000,-0.000000 travel=301.400 yawTravel=0.000 maxSide=0.000 mode=Idle reason=4 running=yes attention=2 active=no id=0 valid=no goal=0.000,0.000,0.000 sighting=-135.211,0.000,90.000 sightTime=0.297213 planTime=0.305546 length=0.000 submissions=1 controller=PedroObserverAIController_0 speedLimit=180.000 accel=500.000 brake=600.000 accelPaths=yes awareness=Perceived has=yes known=-135.211,0.000,90.000 actual=-135.211,0.000,90.000 time=35.290206 target=BP_MainPlayerCharacter_C_0 player=BP_MainPlayerCharacter_C_0 grounded=yes evidence=0 sampled=0 emitted=- acquired=- final=no progress=0 otherId=0 otherRoot=0.000,0.000,0.000'))
+        self.assertAlmostEqual(end['travel'],301.4)
+        with self.assertRaisesRegex(ValueError,'off-axis'):v.verify_saved_follow(start,end)
+    def test_valid_seed_and_convergence(self):
+        v.verify_saved_follow(self.start,self.end)
+    def test_wrong_final_heading(self):
+        with self.assertRaisesRegex(ValueError,'converge'):v.verify_saved_follow(self.start,dict(self.end,forward=(0,1,0)))
+    def test_no_net_yaw(self):
+        with self.assertRaisesRegex(ValueError,'actual movement/turn'):v.verify_saved_follow(self.start,dict(self.end,body=self.start['body']))
+    def test_target_changed(self):
+        with self.assertRaisesRegex(ValueError,'target moved'):v.verify_saved_follow(self.start,dict(self.end,actual=(1,1,1)))
+    def test_preexisting_request(self):
+        with self.assertRaisesRegex(ValueError,'already had a route'):v.verify_saved_follow(dict(self.start,submissions=1),self.end)
+
+class SavedNavigationPairTests(unittest.TestCase):
+    def setUp(self):
+        self.rows=navigation_example('navigation-integration').splitlines()
+        def sample(status,step):
+            return v.nav_sample(v.nav_fields(next(l for l in self.rows if f'status={status} ' in l and f' step={step} ' in l)))
+        self.prior=sample('PASS','SavedRadioOccluded')
+        self.start=sample('STEP_BEGIN','SavedRelocationNoReplay')
+        self.end=sample('CHECK','SavedRelocationNoReplay')
+    def test_valid_second_leg(self):
+        v.verify_saved_continuity(self.prior,self.start);v.verify_saved_relocation(self.start,self.end)
+    def test_observer_teleport_between_steps(self):
+        with self.assertRaisesRegex(ValueError,'pose changed'):v.verify_saved_continuity(self.prior,dict(self.start,root=(0,0,90)))
+    def test_controller_reset(self):
+        with self.assertRaisesRegex(ValueError,'identity changed'):v.verify_saved_continuity(self.prior,dict(self.start,controller='Other'))
+    def test_preissued_second_route(self):
+        with self.assertRaisesRegex(ValueError,'setup changed'):v.verify_saved_continuity(self.prior,dict(self.start,submissions=self.start['submissions']+1))
+    def test_same_player_position(self):
+        with self.assertRaisesRegex(ValueError,'new distant'):v.verify_saved_continuity(self.prior,dict(self.start,actual=self.prior['actual']))
+    def test_no_new_request(self):
+        with self.assertRaisesRegex(ValueError,'new movement request'):v.verify_saved_relocation(self.start,dict(self.end,submissions=self.start['submissions']))
+    def test_travel_without_net_displacement(self):
+        with self.assertRaisesRegex(ValueError,'net displacement'):v.verify_saved_relocation(self.start,dict(self.end,root=self.start['root']))
+    def test_second_target_moved(self):
+        with self.assertRaisesRegex(ValueError,'changed during movement'):v.verify_saved_relocation(self.start,dict(self.end,actual=(0,0,0)))
+    def test_second_heading_not_converged(self):
+        with self.assertRaisesRegex(ValueError,'converge'):v.verify_saved_relocation(self.start,dict(self.end,forward=(0,1,0)))
+    def test_full_report_rejects_teleport(self):
+        t=NavigationReportTests().alter('controller','Other',step='SavedRelocationNoReplay',suite='navigation-integration',status='STEP_BEGIN')
+        with self.assertRaisesRegex(ValueError,'identity changed'):v.verify_navigation(t,'navigation-integration')
+
+class SavedNavigationRestoreTests(unittest.TestCase):
+    suite='navigation-integration'
+    step='SavedRestoreSightNoReplay'
+    def setUp(self):
+        self.text=navigation_example(self.suite)
+        self.result=v.verify_navigation(self.text,self.suite)
+        self.end=self.result['steps'][self.step]
+        self.start=v.nav_sample(v.nav_fields(next(l for l in self.text.splitlines() if 'status=STEP_BEGIN ' in l and f' step={self.step} ' in l)))
+    def test_lost_then_reacquired(self):
+        self.assertEqual(self.start['awareness'],'LostSight');self.assertTrue(v.saved_restore_ready(self.start,self.end))
+    def test_stale_sighting_not_ready(self):
+        self.assertFalse(v.saved_restore_ready(self.start,dict(self.end,time=self.start['time'])))
+    def test_not_tracking_not_ready(self):
+        self.assertFalse(v.saved_restore_ready(self.start,dict(self.end,attention=3)))
+    def test_new_request_rejected(self):
+        with self.assertRaisesRegex(ValueError,'submitted a route'):v.verify_saved_restore_sample(self.start,dict(self.end,submissions=self.start['submissions']+1))
+    def test_player_motion_rejected(self):
+        with self.assertRaisesRegex(ValueError,'player position'):v.verify_saved_restore_sample(self.start,dict(self.end,actual=(0,0,0)))
+    def test_evidence_replay_rejected(self):
+        with self.assertRaisesRegex(ValueError,'altered evidence'):v.verify_saved_restore_sample(self.start,dict(self.end,evidence=2))
+    def test_missing_restore_step(self):
+        with self.assertRaisesRegex(ValueError,'case order'):v.verify_navigation('\n'.join(l for l in self.text.splitlines() if f' step={self.step} ' not in l),self.suite)
+    def test_unstable_restore_rejected(self):
+        t=NavigationReportTests().alter('attention','3',step=self.step,index=-2,suite=self.suite)
+        with self.assertRaisesRegex(ValueError,'stable fresh perception'):v.verify_navigation(t,self.suite)
 
 if __name__=='__main__':unittest.main()
