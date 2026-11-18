@@ -1,18 +1,4 @@
-"""B2b-5b2: UE 5.8.2 EDITOR-only, fail-closed map/Blueprint authoring.
-
-Run ONLY using Tools/PedroValidation/b2b5b2_run.sh, which sets environment
-variables and temporarily enables the necessary Editor plugins.
-
-Modes:
-  inspect -- source map inventory, no asset writes
-  build   -- new map/asset creation and binding, never alter source levels
-  verify  -- independently reopen destination assets and check references
-  resume  -- guarded continuation after the known two-map-only failed build
-  probe   -- read-only real-UE soft-reference path diagnostics
-
-This script intentionally does not create gameplay evidence, simulate mouse
-input, claim PIE results, remove any production asset, or touch another map.
-"""
+"""Read-only saved ObserverActorTest map and Blueprint verification."""
 
 from __future__ import annotations
 
@@ -25,9 +11,6 @@ import traceback
 import unreal
 
 ROOT = "/Game/AI_Gavin/Encounters/Pedro/Validation"
-SOURCE_PEDRO = ROOT + "/L_Pedro_DirectPlayTest"
-SOURCE_HUB = ROOT + "/L_Hub_Pedro_DirectPlayTest"
-SOURCE_DATA = ROOT + "/DA_Encounter_Pedro_DirectPlayTest"
 TARGET_PEDRO = ROOT + "/L_Pedro_ObserverActorTest"
 TARGET_HUB = ROOT + "/L_Hub_Pedro_ObserverActorTest"
 TARGET_DATA = ROOT + "/DA_Encounter_Pedro_ObserverActorTest"
@@ -36,7 +19,7 @@ TARGET_ID = "PedroObserverActorTest"
 OBSERVER_LABEL = "PEDRO_OBSERVER_ACTOR_Test"
 ORIGINAL_EYE_LABEL = "PEDRO_DIRECT_PLAY_ObserverEye"
 
-MODE = os.environ.get("B2B5B2_MODE", "inspect")
+MODE = os.environ.get("B2B5B2_MODE", "")
 RUN_ID = os.environ.get("B2B5B2_RUN_ID", "manual")
 RESULT_PATH = Path(os.environ.get("B2B5B2_RESULT_PATH", "/tmp/b2b5b2_report.json"))
 PROJECT = Path(os.environ.get("B2B5B2_PROJECT", str(Path(unreal.Paths.project_dir())))).resolve()
@@ -76,18 +59,6 @@ def property_value(obj, *names):
         except (AttributeError, RuntimeError, TypeError) as exc:
             errors.append("%s: %s" % (name, exc))
     raise RuntimeError("Property lookup failed on %s. Tried %s. %s" %
-                       (obj.get_name(), names, " | ".join(errors)))
-
-
-def set_property(obj, value, *names):
-    errors = []
-    for name in names:
-        try:
-            obj.set_editor_property(name, value)
-            return name
-        except (AttributeError, RuntimeError, TypeError) as exc:
-            errors.append("%s: %s" % (name, exc))
-    raise RuntimeError("Property write failed on %s. Tried %s. %s" %
                        (obj.get_name(), names, " | ".join(errors)))
 
 
@@ -196,37 +167,6 @@ def check_soft_world_property(obj, prop, asset_path):
     return actual
 
 
-def set_soft_world_property(obj, prop, asset_path):
-    """Write a level soft reference, verifying exact path after each attempt.
-
-    Creation may persist partial assets. Refuse ambiguous values and log all
-    conversion attempts rather than accepting a Python struct representation.
-    """
-    require(_canonical_game_asset_path(asset_path) == asset_path,
-            "Non-canonical destination map: " + asset_path)
-    full_path = asset_path + "." + asset_path.rsplit("/", 1)[-1]
-    path = unreal.SoftObjectPath(full_path)
-    candidates = [("SoftObjectPath", path)]
-    try:
-        candidates.append(("SoftObjectReference",
-                           unreal.SystemLibrary.conv_soft_obj_path_to_soft_obj_ref(path)))
-    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-        info("SoftObjectReference conversion unavailable: %s" % exc)
-    diagnostics = []
-    for label, candidate in candidates:
-        try:
-            obj.set_editor_property(prop, candidate)
-            actual, samples = _read_soft_world_property(obj, prop)
-            if actual == asset_path:
-                info("Verified %s.%s = %s via %s" %
-                     (obj.get_name(), prop, actual, label))
-                return actual
-            diagnostics.append("%s read %s (%s)" % (label, actual, samples))
-        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-            diagnostics.append("%s failed: %s: %s" % (label, type(exc).__name__, exc))
-    raise RuntimeError("Cannot set %s.%s to %s: %s" %
-                       (obj.get_name(), prop, full_path, "; ".join(diagnostics)))
-
 def asset_disk_path(asset_path, extension):
     require(asset_path.startswith("/Game/"), "Unexpected asset root: " + asset_path)
     return PROJECT / "Content" / (asset_path[len("/Game/"):] + extension)
@@ -239,19 +179,6 @@ def exists(asset_path, extension):
         return bool(EAL.find_asset_data(asset_path).is_valid())
     except (AttributeError, RuntimeError, TypeError):
         return False
-
-
-def require_destination_absent():
-    for path, ext in ((TARGET_PEDRO, ".umap"), (TARGET_HUB, ".umap"),
-                      (TARGET_DATA, ".uasset"), (TARGET_BP, ".uasset")):
-        require(not exists(path, ext),
-                "Refusing to overwrite a pre-existing asset: " + path)
-
-
-def require_sources():
-    for path, ext in ((SOURCE_PEDRO, ".umap"), (SOURCE_HUB, ".umap"),
-                      (SOURCE_DATA, ".uasset")):
-        require(exists(path, ext), "Source asset unavailable: " + path)
 
 
 def load_level(asset_path):
@@ -339,205 +266,6 @@ def check_director_facts(facts):
             "DirectPlayTest enables assumed knowledge unexpectedly")
     require(abs(facts["core_sample_fraction"] - 0.75) < 0.0001,
             "Expected DirectPlayTest completion threshold 0.75")
-
-
-def inspect_pedro(asset_path, is_source):
-    load_level(asset_path)
-    actors = get_actors()
-    director = one_class(actors, "PedroEncounterDirector")
-    return_volume = one_class(actors, "PedroPrototypeReturnVolume")
-    interactables = exact_class(actors, "PedroPrototypeInteractableActor")
-    require(len(interactables) >= 3, "Expected at least 3 real inspection actors")
-    facts = basic_director_facts(director)
-    check_director_facts(facts)
-    eye = one_label(actors, ORIGINAL_EYE_LABEL) if is_source else one_label(actors, OBSERVER_LABEL)
-    if is_source:
-        require(class_name(eye) == "TargetPoint",
-                "Original observation actor must be a TargetPoint")
-    return {
-        "map": asset_path, "actor_count": len(actors),
-        "director": actor_id(director),
-        "director_facts": facts,
-        "return_volume": actor_id(return_volume),
-        "interactables": [actor_id(a) for a in interactables],
-        "eye": {**actor_id(eye), "position": vec(eye.get_actor_location()),
-                "rotation": rot(eye.get_actor_rotation())},
-    }
-
-
-def inspect_hub(asset_path):
-    load_level(asset_path)
-    actors = get_actors()
-    entrance = one_class(actors, "EncounterEntranceActor")
-    return {"map": asset_path, "actor_count": len(actors),
-            "entrance": actor_id(entrance)}
-
-
-def inspect():
-    require_sources()
-    require_destination_absent()
-    pedro = inspect_pedro(SOURCE_PEDRO, is_source=True)
-    hub = inspect_hub(SOURCE_HUB)
-    info("Source inspection found 4 core opportunities and the physical "
-         "observer TargetPoint to replace")
-    return {"source_pedro": pedro, "source_hub": hub}
-
-
-def ensure_api():
-    require(hasattr(LEVELS, "new_level_from_template"),
-            "LevelEditorSubsystem.new_level_from_template unavailable")
-    require(hasattr(unreal, "BlueprintEditorLibrary"),
-            "BlueprintEditorLibrary unavailable")
-    require(hasattr(unreal.BlueprintEditorLibrary,
-                    "create_blueprint_asset_with_parent"),
-            "Blueprint creation helper unavailable")
-    require(hasattr(unreal, "SubobjectDataSubsystem"),
-            "SubobjectDataSubsystem unavailable")
-    require(hasattr(unreal, "SubobjectDataBlueprintFunctionLibrary"),
-            "SubobjectDataBlueprintFunctionLibrary unavailable")
-    require(hasattr(unreal, "AddNewSubobjectParams"),
-            "AddNewSubobjectParams unavailable")
-    require(hasattr(unreal, "PedroObserverCharacter"),
-            "PedroObserverCharacter UClass not exported to Python. "
-            "Check Editor module build and restart.")
-    require(unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem) is not None,
-            "SubobjectDataSubsystem not initialized")
-
-
-def create_bp():
-    info("Creating Blueprint child " + TARGET_BP)
-    bp = unreal.BlueprintEditorLibrary.create_blueprint_asset_with_parent(
-        TARGET_BP, unreal.PedroObserverCharacter)
-    require(bp is not None, "Blueprint creation failed")
-    subsystem = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
-    bf = unreal.SubobjectDataBlueprintFunctionLibrary
-    handles = list(subsystem.k2_gather_subobject_data_for_blueprint(bp))
-    require(handles, "No blueprint subobject handles")
-    # Native ACharacter calls its inherited capsule CollisionCylinder, not
-    # CapsuleComponent. Selecting by class as well as the two known engine
-    # component names avoids a false negative on UE 5.8.2.
-    capsule_handles = []
-    for handle in handles:
-        candidate = bf.get_object(bf.get_data(handle))
-        if (candidate is not None
-                and isinstance(candidate, unreal.CapsuleComponent)
-                and candidate.get_name() in ("CollisionCylinder", "CapsuleComponent")):
-            capsule_handles.append(handle)
-    require(len(capsule_handles) == 1,
-            "Cannot identify exactly one inherited Character capsule "
-            "(CollisionCylinder/CapsuleComponent); subobjects: %s" %
-            [str(bf.get_object(bf.get_data(h))) for h in handles])
-    parent = capsule_handles[0]
-    info("Selected inherited Character capsule: " +
-         str(bf.get_object(bf.get_data(parent)).get_name()))
-    new_handle, failure = subsystem.add_new_subobject(
-        unreal.AddNewSubobjectParams(parent_handle=parent,
-                                     new_class=unreal.StaticMeshComponent,
-                                     blueprint_context=bp))
-    require(new_handle is not None and not str(failure or "").strip(),
-            "Could not add ValidationBody: " + str(failure))
-    rename_result = subsystem.rename_subobject(new_handle, unreal.Text("ValidationBody"))
-    require(rename_result is not False,
-            "Cannot rename validation body subobject")
-    # add_new_subobject already creates the component beneath parent_handle.
-    # Do NOT redundantly attach the same subobject: some engine versions
-    # reject repeated attachment even though the component is already a child.
-    body = bf.get_object(bf.get_data(new_handle))
-    require(body is not None, "Cannot retrieve ValidationBody component")
-    cube = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
-    require(cube is not None, "Engine Cube static mesh unavailable")
-    body.set_editor_property("static_mesh", cube)
-    body.set_editor_property("relative_location", unreal.Vector(0.0, 0.0, 0.0))
-    body.set_editor_property("relative_scale3d", unreal.Vector(0.4, 0.4, 1.2))
-    body.set_collision_enabled(unreal.CollisionEnabled.NO_COLLISION)
-    require(unreal.BlueprintEditorLibrary.compile_blueprint(bp) is not False,
-            "Blueprint did not compile")
-    require(EAL.save_loaded_asset(bp), "Could not save Blueprint")
-    bp = None
-    loaded_class = EAL.load_blueprint_class(TARGET_BP)
-    require(loaded_class is not None, "Blueprint generated class not found")
-    return loaded_class
-
-
-def create_data():
-    info("Duplicating encounter Data Asset")
-    data = EAL.duplicate_asset(SOURCE_DATA, TARGET_DATA)
-    require(data is not None, "Could not duplicate encounter definition")
-    data.set_editor_property("encounter_id", unreal.Name(TARGET_ID))
-    set_soft_world_property(data, "encounter_map", TARGET_PEDRO)
-    require(str(data.get_editor_property("encounter_id")) == TARGET_ID,
-            "Encounter ID did not persist in memory")
-    require(EAL.save_loaded_asset(data), "Could not save copied encounter definition")
-    return data
-
-
-def build_hub(data):
-    info("Opening copied hub level to bind entrance")
-    load_level(TARGET_HUB)
-    actors = get_actors()
-    entrance = one_class(actors, "EncounterEntranceActor")
-    entrance.set_editor_property("encounter_definition", data)
-    require(property_value(entrance, "encounter_definition") == data,
-            "Hub entrance failed to bind copied definition")
-    require(LEVELS.save_current_level(), "Failed to save copied hub map")
-    info("Saved copied hub with updated entrance")
-
-
-def build_pedro(data, bp_class):
-    info("Opening copied Pedro encounter level to bind observer")
-    load_level(TARGET_PEDRO)
-    actors = get_actors()
-    director = one_class(actors, "PedroEncounterDirector")
-    return_volume = one_class(actors, "PedroPrototypeReturnVolume")
-    previous_eye = one_label(actors, ORIGINAL_EYE_LABEL)
-    require(class_name(previous_eye) == "TargetPoint",
-            "Previous observer eye was not the expected TargetPoint")
-    location = previous_eye.get_actor_location()
-    rotation = previous_eye.get_actor_rotation()
-
-    # The Character's ObserverEye has a local (0,0,64) offset. For the
-    # standard DirectPlay TargetPoint (no eye offset), align the new eye at
-    # its world position. The validation transform is not used for AI movement.
-    local_eye_offset = unreal.Vector(0.0, 0.0, 64.0)
-    up = unreal.MathLibrary.get_up_vector(rotation)
-    world_eye_offset = unreal.Vector(up.x * local_eye_offset.z,
-                                     up.y * local_eye_offset.z,
-                                     up.z * local_eye_offset.z)
-    root_location = unreal.Vector(location.x - world_eye_offset.x,
-                                  location.y - world_eye_offset.y,
-                                  location.z - world_eye_offset.z)
-    observer = ACTORS.spawn_actor_from_class(bp_class, root_location, rotation)
-    require(observer is not None, "Cannot spawn physical observer")
-    observer.set_actor_label(OBSERVER_LABEL, mark_dirty=True)
-    new_eye = property_value(observer, "observer_eye")
-    require(new_eye is not None, "Physical observer has no ObserverEye")
-    actual_eye = new_eye.get_world_location()
-    displacement = ((actual_eye.x - location.x) ** 2 +
-                    (actual_eye.y - location.y) ** 2 +
-                    (actual_eye.z - location.z) ** 2) ** 0.5
-    require(displacement <= 5.0,
-            "Physical eye differs from old TargetPoint by %.2f cm. "
-            "Review Character transform rather than baking a bad test." % displacement)
-
-    director.set_editor_property("encounter_definition", data)
-    set_property(director, False,
-                 "use_prototype_assumed_acquisition", "b_use_prototype_assumed_acquisition")
-    set_property(director, True,
-                 "use_direct_observation_acquisition", "b_use_direct_observation_acquisition")
-    director.set_editor_property("direct_observation_actor", observer)
-    director.set_editor_property("completion_policy",
-                                 unreal.PedroCompletionPolicy.EVIDENCE_DRIVEN)
-    director.set_editor_property("core_sample_fraction", 0.75)
-    # B2b-5b2 playable observer: forward-facing, not omnidirectional.
-    director.set_editor_property(
-        "direct_observation_view_half_angle_degrees", 75.0)
-    set_soft_world_property(return_volume, "return_map", TARGET_HUB)
-    require(property_value(director, "direct_observation_actor") == observer,
-            "Director is not bound to physical observer")
-    require(ACTORS.destroy_actor(previous_eye),
-            "Cannot remove old TargetPoint in copied map")
-    require(LEVELS.save_current_level(), "Could not save copied Pedro map")
-    info("Saved copied Pedro map with physically hosted observation eye")
 
 
 def verify():
@@ -652,178 +380,13 @@ def verify():
                            "entrance": actor_id(entrance)}}
 
 
-def _normalized_inventory(actors):
-    """Check that the saved map copies have not gained/lost gameplay actors."""
-    return sorted((class_name(a), actor_label(a)) for a in actors
-                  if class_name(a) != "WorldSettings")
-
-
-def _resume_pedro_inventory(path):
-    # Reuse existing source inspection: it asserts the old TargetPoint still
-    # exists, one Director and ReturnVolume exist, and 4 core opportunities
-    # retain correct source acquisition settings. This must be true in BOTH.
-    summary = inspect_pedro(path, is_source=True)
-    level_actors = get_actors()
-    director = one_class(level_actors, "PedroEncounterDirector")
-    return_volume = one_class(level_actors, "PedroPrototypeReturnVolume")
-    eye = one_label(level_actors, ORIGINAL_EYE_LABEL)
-    require(property_value(director, "direct_observation_actor") == eye,
-            "Partial map no longer references its original observer TargetPoint")
-    require(check_soft_world_property(return_volume, "return_map", SOURCE_HUB),
-            "Partial Pedro return volume no longer points at source hub")
-    source_data = EAL.load_asset(SOURCE_DATA)
-    require(source_data is not None, "Source encounter definition not found")
-    require(property_value(director, "encounter_definition") == source_data,
-            "Partial Pedro map Director was already rebound; manual review needed")
-    return summary, _normalized_inventory(level_actors)
-
-
-def _resume_hub_inventory(path):
-    summary = inspect_hub(path)
-    level_actors = get_actors()
-    source_data = EAL.load_asset(SOURCE_DATA)
-    require(source_data is not None, "Source encounter definition not found")
-    entrance = one_class(level_actors, "EncounterEntranceActor")
-    require(property_value(entrance, "encounter_definition") == source_data,
-            "Partial hub entrance has been rebound; manual review needed")
-    return summary, _normalized_inventory(level_actors)
-
-
-def probe():
-    """Non-writing diagnostic for soft-map references in the known partial state.
-
-    Proves that the saved source and copied Pedro maps really point at the old
-    hub, and that the source Data Asset really references the old Pedro map.
-    Executes before resume can create ANY additional assets.
-    """
-    require_sources()
-    for path, ext in ((TARGET_PEDRO, ".umap"), (TARGET_HUB, ".umap")):
-        require(exists(path, ext), "Missing partial map for probe: " + path)
-    for path in (TARGET_DATA, TARGET_BP):
-        require(not exists(path, ".uasset"),
-                "Probe expects two-map-only partial state: " + path)
-    references = []
-    for path in (SOURCE_PEDRO, TARGET_PEDRO):
-        load_level(path)
-        volume = one_class(get_actors(), "PedroPrototypeReturnVolume")
-        actual, methods = _read_soft_world_property(volume, "return_map")
-        item = {"map": path, "actor": actor_label(volume),
-                "property": "return_map", "actual": actual,
-                "expected": SOURCE_HUB, "methods": methods}
-        references.append(item)
-        info("PROBE: %s return_map: %s (expected %s)" %
-             (path, actual, SOURCE_HUB))
-    data = EAL.load_asset(SOURCE_DATA)
-    require(data is not None, "Cannot load source encounter definition")
-    actual, methods = _read_soft_world_property(data, "encounter_map")
-    references.append({"asset": SOURCE_DATA, "property": "encounter_map",
-                       "actual": actual, "expected": SOURCE_PEDRO,
-                       "methods": methods})
-    info("PROBE: %s encounter_map: %s (expected %s)" %
-         (SOURCE_DATA, actual, SOURCE_PEDRO))
-    failures = [r for r in references if r["actual"] != r["expected"]]
-    require(not failures,
-            "Soft-reference probe found an absent/unreadable/mismatched "
-            "reference; no assets written. Details: %s" % failures)
-    return {"references": references, "writes": 0}
-
-
-def resume():
-    """Continue ONLY the known B2b-5b2 two-pristine-maps partial creation.
-
-    Nothing is deleted or recreated. If a previous build proceeded farther,
-    or either copied map was changed, fail and request manual recovery.
-    """
-    require_sources()
-    require(exists(TARGET_PEDRO, ".umap") and exists(TARGET_HUB, ".umap"),
-            "Resume requires BOTH previously copied destination maps")
-    for path in (TARGET_DATA, TARGET_BP):
-        require(not exists(path, ".uasset"),
-                "Refusing resume: destination asset already exists: " + path)
-    ensure_api()
-
-    info("Resume preflight: inspect both original maps and both partial copies")
-    source_pedro, source_pedro_actors = _resume_pedro_inventory(SOURCE_PEDRO)
-    source_hub, source_hub_actors = _resume_hub_inventory(SOURCE_HUB)
-    partial_pedro, partial_pedro_actors = _resume_pedro_inventory(TARGET_PEDRO)
-    partial_hub, partial_hub_actors = _resume_hub_inventory(TARGET_HUB)
-
-    require(source_pedro_actors == partial_pedro_actors,
-            "Destination Pedro map actor inventory differs from source; "
-            "refuse to overwrite authored edits")
-    require(source_hub_actors == partial_hub_actors,
-            "Destination hub map actor inventory differs from source; "
-            "refuse to overwrite authored edits")
-    require(source_pedro["director_facts"] == partial_pedro["director_facts"],
-            "Destination Pedro Director settings differ from source")
-    require(source_pedro["eye"]["position"] == partial_pedro["eye"]["position"]
-            and source_pedro["eye"]["rotation"] == partial_pedro["eye"]["rotation"],
-            "Destination original TargetPoint was moved or rotated")
-    require(source_pedro["interactables"] == partial_pedro["interactables"],
-            "Destination Pedro inspectable props differ from source")
-    require(source_hub["entrance"] == partial_hub["entrance"],
-            "Destination hub entrance differs from source")
-    info("PASS: Both saved partial map copies match their pristine sources")
-
-    # Begin exactly where the prior build failed. Do not duplicate maps again.
-    create_bp()
-    data = create_data()
-    build_hub(data)
-    bp_class = EAL.load_blueprint_class(TARGET_BP)
-    require(bp_class is not None, "Cannot reload generated observer class")
-    build_pedro(data, bp_class)
-    return {
-        "resume_preflight": "PASS: exactly two untouched cloned maps; no BP/Data",
-        "source": {"source_pedro": source_pedro, "source_hub": source_hub},
-        "verified": verify(),
-    }
-
-
-def build():
-    require_sources()
-    require_destination_absent()
-    ensure_api()
-    # Inventory both source maps BEFORE writing any asset. Never rely on
-    # guessed actor counts or labels when modifying a binary Unreal world.
-    source = inspect()
-    # Use the Level Editor subsystem, not EditorAssetLibrary. Map duplication
-    # is not supported by EditorAssetLibrary. Build maps first so the soft
-    # EncounterMap and ReturnMap targets already exist in the asset registry.
-    info("Creating isolated hub level from template")
-    require(LEVELS.new_level_from_template(TARGET_HUB, SOURCE_HUB),
-            "Could not create new hub level from template")
-    info("Creating isolated Pedro level from template")
-    require(LEVELS.new_level_from_template(TARGET_PEDRO, SOURCE_PEDRO),
-            "Could not create new Pedro level from template")
-    create_bp()
-    data = create_data()
-    # Do not hold references to actors from a different world while loading.
-    build_hub(data)
-    bp_class = EAL.load_blueprint_class(TARGET_BP)
-    build_pedro(data, bp_class)
-    return {"source": source, "verified": verify()}
-
-
 def main():
     version = str(unreal.SystemLibrary.get_engine_version())
-    require(version.startswith("5.8.2"),
-            "This kit requires UE 5.8.2, got " + version)
-    require(MODE in ("inspect", "build", "verify", "resume", "probe"), "Unknown mode " + MODE)
-    require(LEVELS is not None and ACTORS is not None,
-            "Required Editor subsystems unavailable")
-    info("mode=%s run_id=%s engine=%s" % (MODE, RUN_ID, version))
-    if MODE == "inspect":
-        payload = inspect()
-    elif MODE == "build":
-        payload = build()
-    elif MODE == "resume":
-        payload = resume()
-    elif MODE == "probe":
-        payload = probe()
-    else:
-        payload = verify()
+    require(version.startswith("5.8.2"), "Expected UE 5.8.2, got " + version)
+    require(MODE == "verify", "Run the saved-map verifier using its shell runner")
+    require(LEVELS is not None and ACTORS is not None, "Required Editor subsystems unavailable")
     return {"status": "PASS", "mode": MODE, "run_id": RUN_ID,
-            "engine": version, "details": payload}
+            "engine": version, "details": verify()}
 
 
 if __name__ == "__main__":

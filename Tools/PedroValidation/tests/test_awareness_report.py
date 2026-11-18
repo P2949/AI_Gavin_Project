@@ -1,7 +1,5 @@
 """Offline protocol tests; synthetic examples are not Unreal test evidence."""
-import contextlib
-import io
-import os
+import subprocess
 import tempfile
 from unittest.mock import patch
 from pathlib import Path
@@ -133,31 +131,53 @@ class RuntimeTests(unittest.TestCase):
 
 class ScopeAuditTests(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.old=os.getcwd();os.chdir(self.tmp.name)
-        self.addCleanup(self.tmp.cleanup);self.addCleanup(os.chdir,self.old)
-        self.status=b'';self.branch=audit.BRANCH;self.head=audit.BASELINE
+        self.status = b''
+        self.ancestor = True
         def fake_git(*args):
-            if args[0]=='branch':return self.branch.encode()+b'\n'
-            if args[0]=='rev-parse':return self.head.encode()+b'\n'
-            if args[0]=='status':return self.status
+            if args == ('merge-base', '--is-ancestor', audit.BASELINE, 'HEAD'):
+                if not self.ancestor:
+                    raise subprocess.CalledProcessError(1, ['git', *args])
+                return b''
+            if args == ('status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'):
+                return self.status
+            if args == ('diff', '--cached', '--check'):
+                return b''
             raise AssertionError(args)
-        patcher=patch.object(audit,'git',side_effect=fake_git);patcher.start();self.addCleanup(patcher.stop)
-        self.stdout=contextlib.redirect_stdout(io.StringIO());self.stdout.__enter__();self.addCleanup(self.stdout.__exit__,None,None,None)
-    def populate(self):
-        for name in audit.EXPECTED:
-            p=Path(name);p.parent.mkdir(parents=True,exist_ok=True);p.write_text('candidate')
-        self.status=b''.join(b'?? '+name.encode()+b'\0' for name in sorted(audit.EXPECTED))
-    def test_clean(self): audit.audit(clean=True)
-    def test_exact_files(self): self.populate();audit.audit()
-    def test_wrong_branch(self):
-        self.branch='main'
-        with self.assertRaises(ValueError):audit.audit(clean=True)
-    def test_unrelated_modification(self):
-        self.populate();self.status+=b' M Config/DefaultEngine.ini\0'
-        with self.assertRaises(ValueError):audit.audit()
-    def test_existing_destination(self):
-        self.populate();self.status=b''
-        with self.assertRaises(ValueError):audit.audit(clean=True)
+        patcher = patch.object(audit, 'git', side_effect=fake_git)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_clean(self):
+        audit.audit()
+
+    def test_fully_staged(self):
+        self.status = b'A  new file\0M  edited\0D  old file\0'
+        audit.audit()
+
+    def test_wrong_baseline(self):
+        self.ancestor = False
+        with self.assertRaises(subprocess.CalledProcessError):
+            audit.audit()
+
+    def test_untracked(self):
+        self.status = b'?? unexpected\0'
+        with self.assertRaises(ValueError):
+            audit.audit()
+
+    def test_unstaged(self):
+        self.status = b' M Config/DefaultEngine.ini\0'
+        with self.assertRaises(ValueError):
+            audit.audit()
+
+    def test_partly_staged(self):
+        self.status = b'AM edited-after-stage\0'
+        with self.assertRaises(ValueError):
+            audit.audit()
+
+    def test_conflict(self):
+        self.status = b'UU unresolved\0'
+        with self.assertRaises(ValueError):
+            audit.audit()
 
 class UnityTests(unittest.TestCase):
     def setUp(self):
