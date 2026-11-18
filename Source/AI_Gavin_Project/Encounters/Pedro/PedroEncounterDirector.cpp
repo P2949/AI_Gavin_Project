@@ -3,6 +3,7 @@
 #include "Encounters/Pedro/PedroActivePresentation.h"
 #include "Encounters/Pedro/PedroDirectObservation.h"
 #include "Encounters/Pedro/PedroObservationSourceComponent.h"
+#include "Encounters/Pedro/PedroObserverAIController.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -310,6 +311,7 @@ void APedroEncounterDirector::BeginPlay()
     ShadowCompletionDecision = FPedroCompletionDecision{};
     bActiveCompletionQueued = false;
     bHasFinalClassification = false;
+    bCommittedContextResolution = false;
     FinalClassification = FPedroClassificationResult{};
 
     SetOutcomeActorActive(
@@ -506,6 +508,16 @@ void APedroEncounterDirector::HandleWorldEventProduced(
                 *Event.SubjectId.ToString(),
                 *Event.OpportunityId.ToString(),
                 ObservationState.GetEvidenceCount());
+        }
+
+        // Accepted knowledge only; no registration, rejected or assumed event notification.
+        if (Evidence.KnowledgeSource == EPedroKnowledgeSource::DirectObservation)
+        {
+            if (auto* Pawn = Cast<APawn>(DirectObservationActor.Get()))
+            {
+                if (auto* Controller = Cast<APedroObserverAIController>(Pawn->GetController()))
+                    Controller->ReceiveContextEvidence(this, Evidence);
+            }
         }
 
         // Track only explicitly configured core/bonus opportunities.
@@ -770,6 +782,13 @@ void APedroEncounterDirector::EvaluateActiveCompletion()
         FinalClassification = FPedroClassificationResult{};
         UE_LOG(LogTemp, Display, TEXT("PEDRO_ACTIVE blocked=ResolutionRejected"));
         return;
+    }
+
+    bCommittedContextResolution = true;
+    if (auto* Pawn = Cast<APawn>(DirectObservationActor.Get()))
+    {
+        if (auto* Controller = Cast<APedroObserverAIController>(Pawn->GetController()))
+            Controller->ReceiveContextResolution(this);
     }
 
     UE_LOG(LogTemp, Display,

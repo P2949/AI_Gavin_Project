@@ -32,6 +32,7 @@ namespace PedroNavigationPolicy
         const APawn* Player,const FVector& Observer,double Now,const FPedroNavIntent& Intent,const FPedroNavigationSettings& S);
     TArray<FVector> Candidates(const FVector& Observer,const FVector& Known,const FPedroNavigationSettings& S);
     bool AcceptProjection(const FVector& Candidate,const FVector& Projected,const FVector& Known,const FPedroNavigationSettings& S);
+    bool IsSafeSegment(const FVector& A,const FVector& B,const FVector& Known,double Radius,bool bWithdraw);
     bool AcceptPath(bool bComplete,bool bSpecial,double Length,const FPedroNavigationSettings& S);
     bool BetterCandidate(int32 Index,double Cost,int32 BestIndex,double BestCost);
     bool OwnsRequest(FAIRequestID Owned,FAIRequestID Incoming);

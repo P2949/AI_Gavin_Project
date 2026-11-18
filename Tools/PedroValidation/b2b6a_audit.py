@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-BASELINE = 'b740d47ceda2564a7cd0fb817079bfa8d6e4d5f8'  # merged awareness regression baseline
+BASELINE = '3505be00d2816442ed3c1fbbe82f7b31a0d19a24'  # merged navigation regression baseline
 
 def require(condition, message):
     if not condition:
@@ -30,7 +30,7 @@ def audit():
         require(entry[:2] in ('A ', 'M ', 'D ', 'T '),
                 f'Unstaged, untracked or unresolved change: {entry}')
     git('diff', '--cached', '--check')
-    print(f'PASS: merged awareness baseline; {len(changes)} fully staged paths, no unstaged/untracked changes')
+    print(f'PASS: merged navigation baseline; {len(changes)} fully staged paths, no unstaged/untracked changes')
 
 
 def snapshot(directory, label):
@@ -158,7 +158,7 @@ def engine_inspection(engine):
         matches=[f for f in (runtime/module).rglob(name) if all(t in f.read_text(encoding='utf-8',errors='replace') for t in tokens)]
         require(len(matches)==1,f'local navigation API ambiguous or missing: {name}: {matches}')
         print(f'PASS: {matches[0].relative_to(engine)} ({", ".join(tokens)})')
-    # Token inspection is not runtime NavMesh proof. Run navigation-probe first.
+    # Token inspection is not runtime NavMesh proof. Run context-probe first for the new behaviours.
     print('PASS: local API token inspection; compile and native sight/navigation checks establish actual compatibility')
 
 def main():

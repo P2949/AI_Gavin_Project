@@ -29,7 +29,9 @@ ATTENTION_NAMES='Disabled IdleWithoutKnowledge TrackFreshSighting UpdateObserved
 NATIVE_NAMES |= {PREFIX+'Attention.'+name for name in ATTENTION_NAMES}
 NAVIGATION_NAMES='Disabled InvalidObserver NoKnowledge FreshObservedTarget InvalidTarget InvalidLocation InvalidTime InvalidSettings StartDistance StopDistance Hysteresis PreferredDestination PersonalSpace DegenerateGeometry CandidateGeneration CandidateRanking ProjectionLimits PartialAndExcessivePaths RetainExistingRequest ReplanThresholds ContinueLastKnown StaleAndExpiredKnowledge FailureCooldown RequestOwnership'.split()
 NATIVE_NAMES |= {PREFIX+"Navigation."+name for name in NAVIGATION_NAMES}
-assert len(NATIVE_NAMES)==125
+CONTEXT_NAMES='Disabled InvalidSettings MissingBinding NoKnowledge FollowFresh ComfortableDistance AcceptActivity ActivityPriority FixedActivity DuplicateActivity UnsupportedProvenance ExpiredActivity ActivityCap Persistence PriorityInterrupt ObservedDeparture RecentLoss ExpiredLoss WatchPointMetadata CandidateEligibility InvalidPath Score Tie Improvement Dwell LossEpisode Decay Proximity EscapeSafety NoRetreatRoute Disengage Satisfied OptIn WrongBinding AcquiredBoundary AssumedBoundary NoReplay RequestOwnership IndependentReset CommittedResolution'.split()
+NATIVE_NAMES |= {PREFIX+'Context.'+name for name in CONTEXT_NAMES}
+assert len(NATIVE_NAMES)==165
 MAP='/Game/AI_Gavin/Encounters/Pedro/Validation/L_Pedro_ObserverActorTest'
 # Protocol sequence: ID (or - for substep), step, awareness, accepted, sampled.
 # Asterisk is deliberately unconstrained only for I04: event LOS is independent
@@ -98,15 +100,15 @@ def need(condition,msg):
 
 def native(report,exit_status=0):
     tests=report['tests']; names=[t['fullTestPath'] for t in tests]
-    need(len(names)==125 and len(set(names))==125,'expected exactly 125 unique native tests')
+    need(len(names)==165 and len(set(names))==165,'expected exactly 165 unique native tests')
     need(set(names)==NATIVE_NAMES,f'native inventory differs: missing={sorted(NATIVE_NAMES-set(names))} extra={sorted(set(names)-NATIVE_NAMES)}')
     for t in tests:
         need(t['state']=='Success' and t['warnings']==0 and t['errors']==0, f'native failure: {t["fullTestPath"]}')
-    need(report['succeeded']==125,'incorrect success total')
+    need(report['succeeded']==165,'incorrect success total')
     for field in ['succeededWithWarnings','failed','notRun','inProcess']:
         need(report[field]==0,f'{field} nonzero')
-    need(exit_status==0,f'all 125 native tests passed, but native process exit {exit_status}')
-    return {'status':'PASS','baseline':101,'new':24,'total':125,'tests':sorted(names)}
+    need(exit_status==0,f'all 165 native tests passed, but native process exit {exit_status}')
+    return {'status':'PASS','baseline':125,'new':40,'total':165,'tests':sorted(names)}
 
 def native_diagnostics(report, exit_status):
     """Report test failures separately from process failures; never grants acceptance."""
@@ -252,7 +254,8 @@ UNITY_SOURCES = tuple('Source/AI_Gavin_Project/Encounters/Pedro/'+name for name 
     'PedroObserverAIController.cpp', 'Tests/PedroAwarenessStateTests.cpp',
     'Tests/PedroObserverAIControllerTests.cpp', 'Tests/PedroAwarenessWorldTests.cpp',
     'PedroAttentionPolicy.cpp','Tests/PedroAttentionTests.cpp',
-    'PedroNavigationPolicy.cpp','Tests/PedroNavigationTests.cpp'))
+    'PedroNavigationPolicy.cpp','Tests/PedroNavigationTests.cpp',
+    'PedroContextPolicy.cpp','PedroObserverWatchPoint.cpp','PedroEncounterDirector.cpp','Tests/PedroContextTests.cpp'))
 UNITY_NAME = r'Module\.AI_Gavin_Project(?:\.\d+)?\.cpp'
 
 def verify_unity(text, project, exit_status):
@@ -886,8 +889,257 @@ def verify_navigation(text,suite,exit_status=0):
     return {'status':'PASS','suite':suite,'expected':count,'cases':completed,'frames':total_frames,'events':seen_events,'steps':snapshots,'resolution':transition}
 
 
+CONTEXT_PLANS = {'context-probe': [('-', 'ProbeNavCapability'), ('P01', 'ProbeFollow'), ('P02', 'ProbeActivity'), ('P03', 'ProbeWatchPoint'), ('P04', 'ProbeWithdrawal')], 'context': [('-', 'ContextNavCapability'), ('X01', 'ContextDisabled'), ('X02', 'ContextInitiallyHidden'), ('X03', 'ContextFollows'), ('X04', 'ContextInBand'), ('-', 'ActivityBeforeFollow'), ('X05', 'ActivityInterrupt'), ('X06', 'ActivityTurns'), ('X07', 'HiddenActivityRejected'), ('X08', 'ActivityFixedLocation'), ('-', 'SpamReady'), ('X09', 'ActivityCap'), ('-', 'DepartureReady'), ('-', 'DepartureActivity'), ('X10', 'ObservedDeparture'), ('X11', 'WatchPointSelected'), ('X12', 'WatchPointTravel'), ('X13', 'WatchPointArrived'), ('X14', 'DisconnectedPointRejected'), ('X15', 'ViewRejected'), ('-', 'RankingArrival'), ('X16', 'StableRanking'), ('X17', 'ImprovedPosition'), ('-', 'AdaptationArrival'), ('-', 'AdaptationLoseSight'), ('X18', 'AdaptedPreference'), ('-', 'HiddenAdaptationReady'), ('-', 'KnownActivityForAdaptation'), ('X19', 'HiddenAdaptationRejected'), ('-', 'DecayLoseSight'), ('X20', 'AdaptationDecays'), ('-', 'LossFollowReady'), ('X21', 'RetainFollowOnLoss'), ('-', 'LossWatchReady'), ('X22', 'CancelWatchOnLoss'), ('X23', 'ReacquireContext'), ('-', 'WithdrawalMoving'), ('X24', 'WithdrawSafely'), ('X25', 'ObstructedWithdrawal'), ('X26', 'DisengagementRecovery'), ('-', 'DisableContext'), ('X27', 'ReenableContext'), ('-', 'LifecycleReady'), ('-', 'LifecycleEvidence'), ('-', 'ReplaceContextPlayer'), ('-', 'UnpossessContext'), ('-', 'RepossessContext'), ('X28', 'DirectorDestroyed'), ('-', 'TwoObserversReady'), ('X29', 'IndependentContext'), ('-', 'DemoContextFollow'), ('-', 'DemoContextActivity'), ('-', 'DemoContextHidden'), ('-', 'DemoContextReacquire'), ('-', 'DemoContextRelocate'), ('-', 'DemoContextNewActivity'), ('-', 'DemoContextApproach'), ('X30', 'DemoContextWithdrawal')], 'context-integration': [('L01', 'SavedContextConfiguration'), ('L02', 'SavedContextFollow'), ('L03', 'SavedContextStatue'), ('-', 'SavedStatueAttentionSettled'), ('L04', 'SavedContextRadioHidden'), ('-', 'SavedContextRestore'), ('-', 'SavedContextSelectWatchPoint'), ('-', 'SavedContextRelocation'), ('L05', 'SavedContextRadioNew'), ('-', 'SavedRadioAttentionSettled'), ('L06', 'SavedContextSatisfied')]}
+
+# Context protocol is separate from the six accepted legacy protocols.
+CTX_TAG='PEDRO_CONTEXT_TEST '
+CTX_MODES=set('Disabled ObserveIdle FollowPlayer ObserveActivity TravelToWatchPoint WatchFromPosition HoldLastKnown Withdraw Disengaged Satisfied'.split())
+CTX_VECTORS='root start velocity eye forward look activity lastActivity goal sighting known actual'.split()
+CTX_FLOATS='now dt yaw travel yawTravel entered activityAt expiry lastActivityAt selectedScore currentScore lastLoss holdStart resume closeSince disengageUntil length planTime sightTime time health'.split()
+CTX_INTS='reason movement attentionIntent attention seen attempts selection losses generation id submissions evidence sampled progress otherSeen'.split()
+CTX_BOOLS='running lookSet active valid has grounded final satisfied'.split()
+CTX_STRINGS='status case step mode event lastEvent point currentPoint purpose routePoint awareness player target controller director emitted acquired'.split()
+CTX_ZERO='0'*32
+
+def ctx_fields(line,tag=CTX_TAG):
+    result={}
+    for token in line.split(tag,1)[1].strip().split():
+        need('=' in token,'malformed context marker');k,x=token.split('=',1)
+        need(k and x and k not in result,'duplicate/empty context field');result[k]=x
+    return result
+
+def ctx_sample(raw):
+    need(set(raw)==set(CTX_VECTORS+CTX_FLOATS+CTX_INTS+CTX_BOOLS+CTX_STRINGS),'context fields differ')
+    m=dict(raw)
+    for k in CTX_VECTORS:m[k]=vec(m[k])
+    for k in CTX_FLOATS:
+        m[k]=float(m[k]);need(math.isfinite(m[k]),'nonfinite context field '+k)
+    for k in CTX_INTS:
+        m[k]=int(m[k]);need(m[k]>=(-1 if k=='otherSeen' else 0),'negative context field '+k)
+    for k in CTX_BOOLS:
+        need(m[k] in ('yes','no'),'invalid context boolean '+k);m[k]=m[k]=='yes'
+    for k in ('emitted','acquired'):m[k]=ids(m[k])
+    for k in ('event','lastEvent'):
+        m[k]=m[k].lower();need(re.fullmatch(r'[0-9a-f]{32}',m[k]) is not None,'invalid activity ID')
+    need(m['mode'] in CTX_MODES and m['purpose'] in ('None','Follow','WatchPoint','Withdraw'),'invalid contextual state')
+    need(m['awareness'] in ('Unaware','Perceived','LostSight') and m['reason'] in range(10) and m['movement'] in range(5) and m['attentionIntent'] in range(3) and m['attention'] in range(5),'invalid mode/reason')
+    need(m['now']>=0 and m['dt']>=0 and m['travel']>=0 and m['yawTravel']>=0 and 0<=m['time']<=m['now']+.001,'invalid context clock')
+    need(0<=m['seen']<=4096 and 0<=m['losses']<=32 and 0<=m['attempts']<=5,'context memory/query bounds')
+    need(m['evidence']==len(m['acquired']) and m['sampled']<=m['evidence'] and set(m['acquired'])<=set(m['emitted']),'context evidence counters inconsistent')
+    need(m['progress'] in (0,1) and m['final']==(m['progress']==1),'inconsistent final progress')
+    need(math.hypot(*m['velocity'][:2])<=185.1,'context speed exceeds bound')
+    if m['active']:
+        need(m['valid'] and m['id']>0 and m['grounded'] and m['purpose']!='None' and 0<m['length']<=2200.1 and m['submissions']>0,'invalid contextual native request')
+        need(0<=m['sightTime']<=m['planTime']+.001<=m['now']+.002 and m['planTime']-m['sightTime']<=.351,'stale request provenance')
+        gap=math.dist(m['goal'][:2],m['sighting'][:2]);need(gap>=289.9,'destination enters personal space')
+        if m['purpose'] in ('Follow','Withdraw'):need(gap<=550.1 and gap>=349.9,'stand-off goal invalid')
+        if m['purpose']=='WatchPoint':need(m['routePoint']!='None','watch request missing point')
+    else:need(m['id']==0 and m['purpose']=='None' and not m['valid'] and m['length']==0 and pos_equal(m['goal'],(0,0,0),.01),'orphaned contextual request')
+    if m['event']!=CTX_ZERO:
+        need(m['event'] in m['acquired'] and m['activityAt']>=0 and m['activityAt']<=m['now']+.001 and m['holdStart']<=m['activityAt']+.001 and m['expiry']<=m['holdStart']+3.001 and m['expiry']>=m['activityAt'],'activity lacks accepted provenance or bounded expiry')
+    if m['lastEvent']!=CTX_ZERO:need(m['lastEvent'] in m['acquired'],'unacquired interest')
+    return m
+
+def ctx_frame(prev,m,replacement_start=None):
+    dt=m['now']-prev['now'];need(dt>0 and abs(m['dt']-dt)<.00003,'invalid contextual frame time')
+    distance=math.dist(m['root'][:2],prev['root'][:2]);turn=abs((m['yaw']-prev['yaw']+180)%360-180)
+    need(distance<=190*dt+.505 and turn<=90*min(dt,.1)+.805,'context physical rate exceeded')
+    if m['attention']==0:need(turn<=.105,'yaw without attention')
+    need(pos_equal(m['actual'],prev['actual'],.11) and m['player']==prev['player'] and m['health']+.011>=prev['health'],'player forced movement or damage')
+    if m['active'] and prev['active'] and m['id']==prev['id'] and m['controller']==prev['controller']:
+        need(m['purpose']==prev['purpose'] and m['routePoint']==prev['routePoint'] and pos_equal(m['goal'],prev['goal'],.01) and pos_equal(m['sighting'],prev['sighting'],.01) and m['sightTime']==prev['sightTime'] and m['submissions']==prev['submissions'],'owned request mutated')
+        need(math.hypot(*m['velocity'][:2])-math.hypot(*prev['velocity'][:2])<=500*dt+4.1,'excess contextual acceleration')
+        if m['purpose']=='Withdraw' and math.dist(prev['root'][:2],m['sighting'][:2])<250:
+            need(math.dist(m['root'][:2],m['sighting'][:2])+.15>=math.dist(prev['root'][:2],m['sighting'][:2]),'withdrawal moved closer inside escape radius')
+    if m['awareness']=='LostSight' and prev['awareness']=='LostSight' and prev['target']==m['target']:
+        need(m['known']==prev['known'] and m['time']==prev['time'],'hidden spatial memory mutated')
+    if m['awareness']=='Perceived':
+        replacement=(replacement_start is not None and m['now']-replacement_start<=.15 and m['target']=='None' and not m['active'] and m['known']==prev['known'] and m['time']==prev['time'])
+        need((m['target']==m['player'] or replacement) and m['has'],'perceived wrong identity')
+    if m['awareness']=='Unaware':need(not m['has'] and m['target']=='None' and m['known']==(0,0,0) and m['time']==0,'unaware memory leak')
+    if m['mode']=='ObserveActivity':
+        need(not m['active'] and m['event']!=CTX_ZERO and m['lookSet'] and pos_equal(m['look'],m['activity'],.01) and m['now']<=m['expiry']+.12,'invalid activity look or movement')
+    if m['mode']=='Satisfied':need(m['satisfied'] and m['final'] and not m['active'],'false satisfaction or post-completion pursuit')
+    # A lost follow can retain only the fixed request and only for the existing hold window.
+    if m['active'] and m['awareness']=='LostSight':
+        # Native perception can update after the controller in one frame; allow only
+        # a short transition before cancellation of a non-follow contextual route.
+        if m['purpose']!='Follow':need(prev['awareness']!='LostSight' or m['now']-m['time']<=.15,'contextual travel survived sight loss')
+        else:need(m['now']-m['time']<2.001,'expired follow continues')
+    return distance,turn
+
+def ctx_score(raw):
+    vals=[float(raw[k]) for k in ('v','f','i','p','c','r')]
+    need(all(math.isfinite(v) and 0<=v<=1 for v in vals),'invalid watch score axis')
+    score=40*vals[0]+20*vals[1]+15*vals[2]+10*vals[3]-15*vals[4]-10*vals[5]
+    actual=float(raw['score']);need(math.isfinite(actual) and abs(actual-score)<=.0001,'incorrect candidate score');return score
+
+def ctx_selection(rows,summary):
+    need(rows and len(rows)<=6 and sum(r['current']=='yes' for r in rows)==1 and all(r['current'] in ('yes','no') for r in rows),'invalid candidate inventory')
+    current=next(r for r in rows if r['current']=='yes');candidates=[r for r in rows if r['current']=='no']
+    actual=ctx_score(current);need(abs(float(summary['currentScore'])-actual)<.00015,'incorrect current score')
+    ranked=[(ctx_score(c),c['id'],vec(c['goal'])) for c in candidates]
+    need(len({x[1].casefold() for x in ranked})==len(ranked) and all(x[1]!='None' for x in ranked),'duplicate or empty candidate identity')
+    need(len(ranked)<=int(summary['attempts'])<=5,'watch query budget exceeded')
+    eligible=[x for x in ranked if x[0]>=actual+10-.0001]
+    if not eligible:
+        need(summary['selected']=='None' and float(summary['selectedScore'])==0,'unjustified watch relocation');return None
+    # Log rounding can hide sub-1e-4 score differences; otherwise rank exactly.
+    best=max(x[0] for x in eligible);sc,id_,goal=next((x for x in eligible if x[1]==summary['selected']),(-1e9,'None',(0,0,0)))
+    need(abs(sc-best)<.00015 and abs(sc-float(summary['selectedScore']))<.00015,'wrong watch candidate selected')
+    # Exact equal rounded inputs are deterministic in fixture cases.
+    ties=[x[1] for x in eligible if abs(x[0]-best)<1e-8]
+    if len(ties)>1:need(id_==min(ties,key=str.casefold),'unstable watch tie')
+    return id_,goal,sc,actual,float(current['r'])
+
+def ctx_step_assert(step,start,m,snapshots,frames):
+    def stopped():return not m['active'] and math.hypot(*m['velocity'][:2])<1.01
+    def following():return m['active'] and m['purpose']=='Follow' and m['mode']=='FollowPlayer'
+    def activity():return stopped() and m['mode']=='ObserveActivity' and m['event']!=CTX_ZERO and m['lookSet'] and m['attention']==4
+    def watching():return stopped() and m['mode']=='WatchFromPosition' and m['currentPoint']!='None'
+    def watchtravel():return m['active'] and m['purpose']=='WatchPoint' and m['mode']=='TravelToWatchPoint'
+    def withdrawn():return stopped() and m['mode']=='Disengaged' and math.dist(m['root'][:2],m['actual'][:2])>=394.9
+    if step in ('ProbeNavCapability','ContextNavCapability'):need(stopped(),'capability observer not stationary')
+    if step=='ContextDisabled':need(m['mode']=='Disabled' and not m['running'] and m['active'] and m['purpose']=='Follow' and m['travel']>60,'disabled compatibility not demonstrated')
+    if step=='ContextInitiallyHidden':need(stopped() and m['awareness']=='Unaware' and m['submissions']==0,'hidden player pursued')
+    if step in ('ProbeFollow','ContextFollows','ActivityBeforeFollow','DemoContextFollow','LossFollowReady'):need(following() and m['travel']>59,'real follow missing')
+    if step=='ContextInBand':need(stopped() and m['submissions']==0 and m['travel']<2,'in-band pursuit')
+    if step in ('ProbeActivity','ActivityInterrupt','ActivityTurns','ActivityFixedLocation','KnownActivityForAdaptation','LifecycleEvidence','DepartureActivity','DemoContextActivity','DemoContextNewActivity','SavedContextStatue','SavedContextRadioNew','IndependentContext'):
+        need(activity(),'accepted activity not physically observed')
+        if step in ('ProbeActivity','ActivityTurns'):
+            reference=start if step=='ProbeActivity' else snapshots['ActivityBeforeFollow']
+            need(abs((m['yaw']-reference['yaw']+180)%360-180)>4.9,'no autonomous activity turn')
+            dx=m['look'][0]-m['eye'][0];dy=m['look'][1]-m['eye'][1]
+            heading=math.degrees(math.atan2(m['forward'][1],m['forward'][0]));bearing=math.degrees(math.atan2(dy,dx));need(abs((heading-bearing+180)%360-180)<=3.2,'activity not aligned')
+    if step in ('HiddenActivityRejected','HiddenAdaptationRejected','DemoContextHidden','SavedContextRadioHidden'):
+        need(m['evidence']==1 and m['seen']==1 and m['emitted'][-1] not in m['acquired'] and m['lastEvent']==m['acquired'][0],'hidden activity leaked')
+    if step=='HiddenAdaptationRejected':need(m['losses']==snapshots['KnownActivityForAdaptation']['losses'],'hidden event changed adaptation')
+    if step=='ActivityFixedLocation':need(m['lastEvent']==snapshots['ActivityInterrupt']['lastEvent'] and m['lastActivity']==snapshots['ActivityInterrupt']['lastActivity'],'moved subject changed event focus')
+    if step=='ActivityCap':
+        need(m['now']-start['now']>=3.29 and m['evidence']>=10 and m['sampled']==1,'activity spam not exercised')
+        need(any(f['mode']!='ObserveActivity' and f['now']-start['now']>1 for f in frames),'activity never released during repeated events')
+    if step=='ObservedDeparture':need(following() and m['travel']>39,'visible departure did not cause follow')
+    if step in ('WatchPointSelected','WatchPointTravel','ImprovedPosition','LossWatchReady','DemoContextReacquire','SavedContextSelectWatchPoint'):
+        need(watchtravel() and m['selectedScore']+1e-4>=m['currentScore']+10,'watch movement not justified')
+        if step=='WatchPointTravel':need(m['travel']>99,'watch displacement absent')
+    if step in ('ProbeWatchPoint','WatchPointArrived','RankingArrival','AdaptationArrival','DemoContextRelocate','SavedContextRelocation','SavedRadioAttentionSettled'):
+        need(watching(),'watch arrival not demonstrated')
+        if step=='ProbeWatchPoint':need(m['travel']>299 and m['currentPoint']=='Primary','probe missing physical watch relocation')
+        if step=='DemoContextRelocate':need(m['travel']>149,'demo watch movement absent')
+    if step in ('DisconnectedPointRejected','ViewRejected'):need(m['purpose']!='WatchPoint','ineligible watch point used')
+    if step=='StableRanking':need(watching() and m['submissions']==start['submissions'] and m['now']-start['now']>=2.19,'watch oscillated during dwell')
+    if step=='AdaptationLoseSight':need(m['losses']==start['losses']+1 and m['awareness']=='LostSight','sight-loss episode not counted exactly once')
+    if step=='AdaptedPreference':need(m['losses']==snapshots['AdaptationLoseSight']['losses'] and m['awareness']=='Perceived','adaptation/reacquisition absent')
+    if step=='AdaptationDecays':need(m['lastLoss']>=0 and m['now']-m['lastLoss']>=15.49 and stopped(),'adaptation timeout not exercised')
+    if step=='RetainFollowOnLoss':need(m['active'] and m['purpose']=='Follow' and m['awareness']=='LostSight' and m['id']==start['id'] and m['goal']==start['goal'],'follow changed on sight loss')
+    if step=='CancelWatchOnLoss':need(stopped() and m['awareness']=='LostSight' and m['submissions']==start['submissions'],'watch route retained on loss')
+    if step=='ReacquireContext':need(m['active'] and m['awareness']=='Perceived' and m['submissions']>start['submissions'],'no new legitimate movement on reacquisition')
+    if step in ('ProbeWithdrawal','WithdrawSafely','DemoContextWithdrawal'):need(withdrawn() and m['travel']>(199 if step=='ProbeWithdrawal' else 99),'physical withdrawal missing')
+    if step=='ObstructedWithdrawal':need(stopped() and m['mode']=='Disengaged' and m['submissions']>0 and math.dist(m['root'][:2],m['actual'][:2])<395,'blocked retreat not safe')
+    if step=='DisengagementRecovery':need(following() and m['now']>=start['disengageUntil']-.001,'disengagement bypass')
+    if step=='DisableContext':need(not m['running'] and m['mode']=='Disabled' and m['active'] and m['purpose']=='Follow' and m['seen']==0,'independent control not restored')
+    if step=='ReenableContext':need(m['running'] and following() and m['seen']==0,'context re-enable replayed history')
+    if step in ('ReplaceContextPlayer','UnpossessContext','RepossessContext','DirectorDestroyed'):need(m['seen']==0 and stopped(),'context lifecycle retained memory or motion')
+    if step=='ReplaceContextPlayer':need(m['generation']>start['generation'] and m['awareness']=='Unaware','player generation not reset')
+    if step=='DirectorDestroyed':need(not m['running'],'destroyed Director still bound')
+    if step=='IndependentContext':need(m['otherSeen']==0 and m['seen']==1,'observers shared activity memory')
+    if step=='SavedContextFollow':need(stopped() and m['travel']>150 and m['yawTravel']>5 and m['evidence']==0,'saved follow not physically demonstrated')
+    if step=='SavedContextRestore':need(stopped() and m['time']>start['time'] and m['submissions']==start['submissions'] and m['travel']<2,'saved sight restoration invalid')
+    if step=='SavedContextRelocation':need(math.dist(m['root'][:2],snapshots['SavedContextRestore']['root'][:2])>150 and m['controller']==snapshots['SavedContextFollow']['controller'],'saved movement or controller continuity missing')
+    if step=='DemoContextWithdrawal':need(len(m['emitted'])==3 and m['acquired']==[m['emitted'][0],m['emitted'][2]] and m['progress']==0,'demo evidence identity mismatch')
+    if step=='SavedContextSatisfied':need(m['satisfied'] and stopped() and m['mode']=='Satisfied' and m['sampled']==3 and m['progress']==1 and len(m['emitted'])==4 and m['acquired']==[m['emitted'][i] for i in (0,2,3)],'saved outcome or exact evidence identities missing')
+
+# Expected event stream is independent of endpoint assertions; only the spam
+# case is intentionally variable-length (repeated real interactions at 0.15s).
+CTX_EVENTS={
+ 'context-probe':{'ProbeActivity':('Visible',1)},
+ 'context':{'ActivityInterrupt':('Visible',1),'HiddenActivityRejected':('Occluded',1),'ActivityCap':('Visible',-10),'DepartureActivity':('Visible',1),'KnownActivityForAdaptation':('Visible',1),'HiddenAdaptationRejected':('Occluded',1),'LifecycleEvidence':('Visible',1),'IndependentContext':('Visible',1),'DemoContextActivity':('Visible',1),'DemoContextHidden':('Occluded',1),'DemoContextNewActivity':('Visible',1)},
+ 'context-integration':{'SavedContextStatue':('Visible',1),'SavedContextRadioHidden':('Occluded',1),'SavedContextRadioNew':('Visible',1),'SavedContextSatisfied':('Visible',1)}
+}
+
+def verify_context(text,suite,exit_status=0):
+    need(suite in CONTEXT_PLANS and exit_status==0,'context suite/process failed');need(not FATAL.search(text),'fatal/assertion in context process')
+    lines=text.splitlines();marks=[(i,ctx_fields(l)) for i,l in enumerate(lines) if CTX_TAG in l]
+    plans=CONTEXT_PLANS[suite];count=sum(c!='-' for c,_ in plans)
+    need(marks and marks[0][1]==dict(status='BEGIN',suite=suite,map=MAP,expected=str(count)),'context BEGIN mismatch')
+    need(marks[-1][1]==dict(status='SUMMARY',suite=suite,passed=str(count),expected=str(count),result='PASS'),'context SUMMARY mismatch')
+    need(any('Engine exit requested' in l for l in lines[marks[-1][0]+1:]) and not any('PEDRO_AWARENESS_TEST status=FAIL' in l for l in lines),'context fixture failed or missing clean exit')
+    cap=any('PEDRO_NAV_TEST status=CAPABILITY dynamic=yes connected=yes disconnected=yes' in l for l in lines);saved=any('PEDRO_NAV_TEST status=SAVED_READY original=yes dynamic=yes' in l for l in lines)
+    need((saved and not cap) if suite=='context-integration' else (cap and not saved),'native capability proof missing')
+    emitted=[];acquired=[];event_map={};event_list=[];by_step={};direct=[];accepted_logs=0
+    snapshots={};starts={};completed=[];idx=0;start=prev=None;frames=[];total_frames=0;travel=yawtravel=0.;prior_by_controller={};history={};seen_requests=set();watch_links=[];candidate_rows={};selections={};rejects=[];resolution=0;previous_progress=0
+    for line in lines[marks[0][0]+1:marks[-1][0]]:
+        if 'PEDRO_AWARENESS_TEST status=RESET_EVIDENCE' in line:
+            emitted=[];acquired=[];continue
+        if 'PEDRO_DIRECT status=' in line:
+            direct.append(line);continue
+        if 'PEDRO_DIRECT acquired=yes' in line:
+            need('provenance=DirectObservation' in line,'wrong evidence provenance');accepted_logs+=1;continue
+        if 'PEDRO_CONTEXT_EVENT ' in line:
+            e=ctx_fields(line,'PEDRO_CONTEXT_EVENT ');need(set(e)=={'id','subject','opportunity','trace','location','time','director'},'event fields differ');eid=e['id'].lower()
+            need(re.fullmatch('[0-9a-f]{32}',eid) and eid!=CTX_ZERO and eid not in event_map,'duplicate or invalid event ID')
+            need(idx<len(plans),'event after test completion');step=plans[idx][1];contract=CTX_EVENTS[suite].get(step);need(contract is not None and e['trace']==contract[0],'unexpected event in '+step)
+            e['location']=vec(e['location']);e['time']=float(e['time']);need(math.isfinite(e['time']) and e['time']>=0,'invalid event time');e['id']=eid;e['step']=step
+            need(any(f'status={e["trace"]} ' in l and f'opportunity={e["opportunity"]} ' in l and 'actualLOS=checked' in l for l in direct),'missing matching direct sight check')
+            need(len(direct)==(2 if step=='IndependentContext' else 1),'unexpected Director visibility notifications');direct.clear()
+            event_map[eid]=e;event_list.append(e);by_step[step]=by_step.get(step,0)+1;emitted.append(eid)
+            if e['trace']=='Visible':acquired.append(eid)
+            continue
+        if 'PEDRO_CONTEXT_CANDIDATE ' in line:
+            e=ctx_fields(line,'PEDRO_CONTEXT_CANDIDATE ');key=(e['controller'],int(e['serial']));candidate_rows.setdefault(key,[]).append(e);continue
+        if 'PEDRO_CONTEXT_SELECTION ' in line:
+            e=ctx_fields(line,'PEDRO_CONTEXT_SELECTION ');key=(e['controller'],int(e['serial']));need(key not in selections,'duplicate selection summary');selections[key]=(ctx_selection(candidate_rows.pop(key,[]),e),e);continue
+        if 'PEDRO_CONTEXT_FIXTURE reject=' in line:rejects.append(line);continue
+        if CTX_TAG not in line:continue
+        raw=ctx_fields(line);need(idx<len(plans),'unexpected context sample after inventory');m=ctx_sample(raw);case,step=plans[idx];need((m['case'],m['step'])==(case,step),'context step order differs');kind=m['status']
+        need(m['emitted']==emitted,'emitted event history differs')
+        need(m['acquired']==(acquired if m['director']!='None' else []),'evidence identity history differs')
+        need(m['seen']<=m['evidence'] or (kind=='STEP_BEGIN' and step=='DirectorDestroyed'),'context observed unacquired event')
+        for ident,loc,at in [('event','activity','activityAt'),('lastEvent','lastActivity','lastActivityAt')]:
+            if m[ident]!=CTX_ZERO:
+                e=event_map.get(m[ident]);need(e and e['trace']=='Visible' and e['director']==m['director'] and pos_equal(e['location'],m[loc],.01) and abs(e['time']-m[at])<=.351,'activity provenance mutated')
+        if m['progress']!=previous_progress:need(previous_progress==0 and m['progress']==1 and suite=='context-integration' and step=='SavedContextSatisfied','unexpected progress transition');resolution+=1;previous_progress=m['progress']
+        c=m['controller'];h=history.setdefault(c,[])
+        if m['awareness']=='Perceived' and m['has'] and m['target']==m['player']:
+            h.append((m['time'],m['known']));h[:]=h[-512:]
+        prior=prior_by_controller.get(c)
+        if m['active'] and (not prior or not prior['active'] or prior['id']!=m['id']):
+            request=(c,m['id']);need(request not in seen_requests,'native request ID reused');seen_requests.add(request)
+            need(m['awareness']=='Perceived' and any(t+.001>=m['sightTime'] and pos_equal(p,m['sighting'],1.01) for t,p in h),'new route without legitimate sighting')
+            if prior and prior['submissions']>0:need(m['submissions']==prior['submissions']+1,'request submission count skipped')
+            if m['purpose']=='WatchPoint':watch_links.append((c,m['selection'],m['routePoint'],m['goal']))
+            if m['purpose']=='Withdraw':need(m['closeSince']>=0 and m['planTime']-m['closeSince']>=.49,'withdrawal before sustained proximity')
+        prior_by_controller[c]=m
+        if kind=='STEP_BEGIN':
+            need(start is None and m['dt']==0 and m['travel']==0 and m['yawTravel']==0,'invalid context step begin')
+            if suite=='context-integration' and snapshots and step!='SavedContextFollow':
+                old=next(reversed(snapshots.values()));need(m['controller']==old['controller'] and math.dist(old['root'][:2],m['root'][:2])<=190*max(0,m['now']-old['now'])+.6,'saved observer reset or teleported')
+            start=prev=m;starts[step]=m;frames=[];travel=yawtravel=0.;continue
+        need(start is not None,'sample without step begin')
+        if kind=='FRAME':
+            distance,turn=ctx_frame(prev,m,start['now'] if step=='ReplaceContextPlayer' else None);travel+=distance;yawtravel+=turn;frames.append(m);total_frames+=1
+            need(abs(travel-m['travel'])<=.06+len(frames)*.002 and abs(yawtravel-m['yawTravel'])<=.06+len(frames)*.00002,'context measured totals differ')
+            prev=m;continue
+        need(kind==('CHECK' if case=='-' else 'PASS') and len(frames)>=4 and m['dt']==0 and abs(m['now']-prev['now'])<.00003 and pos_equal(m['root'],prev['root'],.01) and m['id']==prev['id'] and abs(m['travel']-prev['travel'])<.002,'context endpoint lacks physical frame chain')
+        ctx_step_assert(step,start,m,snapshots,frames);snapshots[step]=m;idx+=1;start=prev=None
+        if case!='-':completed.append(case)
+    need(idx==len(plans) and start is None and len(completed)==count and len(set(completed))==count,'incomplete context case sequence')
+    need(not direct and not candidate_rows,'unclosed evidence or candidate report')
+    for step,(_,n) in CTX_EVENTS[suite].items():need(by_step.get(step,0)==n if n>0 else by_step.get(step,0)>=-n,'wrong event count at '+step)
+    need(accepted_logs==sum(e['trace']=='Visible' for e in event_list),'Director evidence log count differs')
+    for c,serial,id_,goal in watch_links:
+        result=selections.get((c,serial));need(result and result[0] is not None and result[0][0]==id_ and pos_equal(result[0][1],goal,.01),'watch request did not use selected validated candidate')
+    if suite=='context':
+        need(any('reject=Island:path ' in l for l in rejects) and any('reject=WrongView:view ' in l for l in rejects),'missing rejection diagnostics')
+        a=snapshots['AdaptedPreference'];b=snapshots['AdaptationArrival'];key=(a['controller'],a['selection']);prior_key=(b['controller'],b['selection']);need(key in selections and prior_key in selections,'missing adaptation ranking sample')
+    outcomes=[l for l in lines if 'PEDRO_OUTCOME policy=EvidenceDriven' in l]
+    need(len(outcomes)==resolution==int(suite=='context-integration'),'incorrect completion count')
+    if outcomes:need('interpretation=Seeking sampledCore=3 requiredCore=3 resolved=yes actualLOS=checked' in outcomes[0],'incorrect final interpretation')
+    return {'status':'PASS','suite':suite,'expected':count,'cases':completed,'frames':total_frames,'events':event_list,'steps':snapshots,'resolution':resolution}
+
+
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('suite',choices=['native','world','integration','unity','non-unity','attention','attention-integration','navigation','navigation-integration','navigation-probe']);p.add_argument('input',type=Path);p.add_argument('exit_status',type=int);p.add_argument('output',type=Path)
+    p=argparse.ArgumentParser(); p.add_argument('suite',choices=['native','world','integration','unity','non-unity','attention','attention-integration','navigation','navigation-integration','navigation-probe','context','context-integration','context-probe']);p.add_argument('input',type=Path);p.add_argument('exit_status',type=int);p.add_argument('output',type=Path)
     p.add_argument('--project',type=Path)
     a=p.parse_args()
     try:
@@ -901,6 +1153,8 @@ def main():
             result=verify_unity(text,a.project,a.exit_status)
         elif a.suite=='non-unity':
             result=verify_non_unity(text,a.exit_status)
+        elif a.suite in CONTEXT_PLANS:
+            result=verify_context(text,a.suite,a.exit_status)
         elif a.suite in NAV_PLANS:
             result=verify_navigation(text,a.suite,a.exit_status)
         elif a.suite in ATT_PLANS:

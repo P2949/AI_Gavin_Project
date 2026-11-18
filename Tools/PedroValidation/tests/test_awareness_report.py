@@ -12,7 +12,7 @@ import b2b6a_audit as audit
 
 def native_report():
     return dict(tests=[dict(fullTestPath=n,state='Success',warnings=0,errors=0) for n in sorted(v.NATIVE_NAMES)],
-                succeeded=125,succeededWithWarnings=0,failed=0,notRun=0,inProcess=0)
+                succeeded=165,succeededWithWarnings=0,failed=0,notRun=0,inProcess=0)
 
 
 def example_log(suite):
@@ -56,7 +56,7 @@ def example_log(suite):
     return '\n'.join(rows)+'\n'
 
 class NativeTests(unittest.TestCase):
-    def test_valid(self): self.assertEqual(v.native(native_report())['total'],125)
+    def test_valid(self): self.assertEqual(v.native(native_report())['total'],165)
     def test_missing(self):
         r=native_report();r['tests'].pop()
         with self.assertRaises(ValueError): v.native(r)
@@ -73,11 +73,11 @@ class NativeTests(unittest.TestCase):
         r=native_report();r['notRun']=1
         with self.assertRaises(ValueError):v.native(r)
     def test_process_failure(self):
-        with self.assertRaisesRegex(ValueError,'all 125 native tests passed, but native process exit 1'):v.native(native_report(),1)
+        with self.assertRaisesRegex(ValueError,'all 165 native tests passed, but native process exit 1'):v.native(native_report(),1)
     def test_process_failure_diagnostics(self):
         text=v.native_diagnostics(native_report(),1)
         self.assertIn('Native process exit: 1',text)
-        self.assertIn('"succeeded": 125',text)
+        self.assertIn('"succeeded": 165',text)
         self.assertNotIn('Native test diagnostic:',text)
     def test_failed_assertion_diagnostics(self):
         report=native_report();report['tests'][0].update(state='Fail',errors=1,entries=[{'event':{'message':'actual assertion'}}])
@@ -191,7 +191,7 @@ class UnityTests(unittest.TestCase):
     def write(self,blob,sources):
         blob.write_text(''.join(f'#include "{self.project/name}"\n' for name in sources))
     def verify(self,log=None,rc=0):return v.verify_unity(self.log if log is None else log,self.project,rc)
-    def test_unity_valid(self):self.assertEqual(len(self.verify()['source_membership']),8)
+    def test_unity_valid(self):self.assertEqual(len(self.verify()['source_membership']),12)
     def test_unity_split(self):
         self.write(self.blob,v.UNITY_SOURCES[:2]);self.write(self.dir/'Module.AI_Gavin_Project.2.cpp',v.UNITY_SOURCES[2:])
         self.assertEqual(len(self.verify(self.log.replace('[2/2] Link','[2/3] Compile [x64] Module.AI_Gavin_Project.2.cpp\n[3/3] Link'))['compiled_blobs']),2)
@@ -401,8 +401,8 @@ class AttentionReportTests(unittest.TestCase):
 
 class NonUnityTests(unittest.TestCase):
     def setUp(self):
-        self.log='Running command : UBT -DisableUnity -DisableAdaptiveUnity -gather\n'+''.join(f'[{i+1}/9] Compile {Path(s).name}\n' for i,s in enumerate(v.UNITY_SOURCES))+'[9/9] Link libUnrealEditor-AI_Gavin_Project.so\nResult: Succeeded\n'
-    def test_valid(self):self.assertEqual(v.verify_non_unity(self.log,0)['expected'],8)
+        self.log='Running command : UBT -DisableUnity -DisableAdaptiveUnity -gather\n'+''.join(f'[{i+1}/13] Compile {Path(s).name}\n' for i,s in enumerate(v.UNITY_SOURCES))+'[13/13] Link libUnrealEditor-AI_Gavin_Project.so\nResult: Succeeded\n'
+    def test_valid(self):self.assertEqual(v.verify_non_unity(self.log,0)['expected'],12)
     def test_missing_source(self):
         with self.assertRaises(ValueError):v.verify_non_unity(self.log.replace('Compile PedroAttentionPolicy.cpp','Mention PedroAttentionPolicy.cpp'),0)
     def test_unity_contamination(self):
@@ -681,3 +681,116 @@ class SavedNavigationRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'stable fresh perception'):v.verify_navigation(t,self.suite)
 
 if __name__=='__main__':unittest.main()
+
+# Synthetic context reports: these test the verifier, not Unreal behaviour.
+def context_sample(**overrides):
+    d={k:'0,0,0' for k in v.CTX_VECTORS}
+    d.update({k:'0' for k in v.CTX_FLOATS+v.CTX_INTS})
+    d.update({k:'no' for k in v.CTX_BOOLS})
+    d.update({k:'None' for k in v.CTX_STRINGS})
+    d.update(status='FRAME',case='P01',step='ProbeFollow',mode='ObserveIdle',purpose='None',awareness='Perceived',player='Player',target='Player',controller='C',director='D',event=v.CTX_ZERO,lastEvent=v.CTX_ZERO,emitted='-',acquired='-',has='yes',grounded='yes',running='yes',now='10',time='9.95',health='100',known='1000,0,0',actual='1000,0,0',forward='1,0,0',holdStart='-1',lastLoss='-1',closeSince='-1',planTime='-1',otherSeen='-1')
+    d.update({k:str(x) for k,x in overrides.items()});return d
+
+
+def context_candidate(id_='A',current=False,**kw):
+    d=dict(controller='C',serial='1',id=id_,current='yes' if current else 'no',goal='450,0,0',v='1',f='0' if current else '1',i='0',p='0' if current else '1',c='0' if current else '.25',r='0')
+    d.update({k:str(x) for k,x in kw.items()});d['score']=str(40*float(d['v'])+20*float(d['f'])+15*float(d['i'])+10*float(d['p'])-15*float(d['c'])-10*float(d['r']));return d
+
+
+def context_selection():
+    return [context_candidate('None',True),context_candidate()],dict(controller='C',serial='1',attempts='1',selectedScore='66.25',currentScore='40',selected='A')
+
+
+def context_line(tag,d):return tag+' '.join(f'{k}={x}' for k,x in d.items())
+
+
+def context_probe_example():
+    import math
+    suite='context-probe';rows=[v.CTX_TAG+f'status=BEGIN suite={suite} map={v.MAP} expected=4','PEDRO_NAV_TEST status=CAPABILITY dynamic=yes connected=yes disconnected=yes length=700']
+    t=1.;eid='1'*32
+    def step(case,name,c,d,player,points,*,mode,active=False,purpose='None',request=0,goal=0,selection=0,watch=None,activity=False,withdraw=False):
+        nonlocal t
+        t+=.1;begin=t; travel=yawtravel=0.;lastx=points[0][0];lastyaw=points[0][1];startx=lastx;plan=begin+.1; sight=plan-.05
+        def make(kind,x,yaw,frame,run_active,final_mode):
+            theta=math.radians(yaw);focus=activity;at=begin if focus else 0
+            e=eid if focus else v.CTX_ZERO
+            values=context_sample(status=kind,case=case,step=name,controller=c,director=d,now=f'{t:.6f}',dt='.1' if kind=='FRAME' else '0',root=f'{x},0,0',start=f'{startx},0,0',velocity='100,0,0' if run_active and not withdraw else '-150,0,0' if run_active else '0,0,0',yaw=yaw,eye=f'{x},0,64',forward=f'{math.cos(theta):.6f},{math.sin(theta):.6f},0',travel=f'{travel:.3f}',yawTravel=f'{yawtravel:.3f}',mode=final_mode,active='yes' if run_active else 'no',purpose=purpose if run_active else 'None',id=request if run_active else 0,goal=f'{goal},0,0' if run_active else '0,0,0',valid='yes' if run_active else 'no',length=abs(goal-startx) if run_active else 0,submissions=1 if frame>0 and (active or withdraw) else 1 if focus else 0,planTime=plan if run_active else -1,sighting=f'{player},0,0' if run_active else '0,0,0',sightTime=sight if run_active else 0,known=f'{player},0,0',actual=f'{player},0,0',time=f'{t-.02:.6f}',attention=4 if focus else 2,lookSet='yes' if focus else 'no',look='1000,250,64' if focus else '0,0,0',event=e,lastEvent=e,activity='1000,250,64' if focus else '0,0,0',lastActivity='1000,250,64' if focus else '0,0,0',activityAt=f'{at:.6f}',lastActivityAt=f'{at:.6f}',expiry=f'{at+2:.6f}' if focus else 0,holdStart=at if focus else -1,seen=1 if focus else 0,evidence=1 if focus else 0,sampled=1 if focus else 0,emitted=eid if focus else '-',acquired=eid if focus else '-',selection=selection,routePoint=watch if run_active and watch else 'None',point=watch if watch else 'None',currentPoint=watch if final_mode=='WatchFromPosition' else 'None',selectedScore=66.25 if watch else 0,currentScore=40 if watch else 0,attempts=1 if watch else 0,closeSince=begin-.5 if withdraw else -1,disengageUntil=t+3 if final_mode=='Disengaged' else 0)
+            return values
+        # The event occurs synchronously in Setup before STEP_BEGIN.
+        if activity:rows.extend(['PEDRO_DIRECT status=Visible kind=1 subject=Prop opportunity=Prop actualLOS=checked','PEDRO_DIRECT acquired=yes kind=1 subject=Prop opportunity=Prop total=1 provenance=DirectObservation',f'PEDRO_CONTEXT_EVENT id={eid} subject=Prop opportunity=Prop trace=Visible location=1000,250,64 time={begin:.6f} director={d}'])
+        rows.append(context_line(v.CTX_TAG,make('STEP_BEGIN',lastx,lastyaw,0,False,mode)))
+        final=None
+        for i,(x,yaw) in enumerate(points[1:],1):
+            t+=.1;travel+=abs(x-lastx);yawtravel+=abs(yaw-lastyaw);lastx=x;lastyaw=yaw
+            moving=(active or withdraw) and (i<len(points)-3 or mode=='FollowPlayer')
+            endmode=mode if moving or not(active or withdraw) else ('Disengaged' if withdraw else 'WatchFromPosition')
+            final=make('FRAME',x,yaw,i,moving,endmode)
+            if moving and withdraw:final['planTime']=f'{plan:.6f}';final['sightTime']=f'{sight:.6f}'
+            rows.append(context_line(v.CTX_TAG,final))
+            if i==1 and watch:
+                cand,summary=context_selection();cand[1]['id']=watch;cand[1]['goal']=f'{goal},0,0';summary['selected']=watch
+                for item in cand:item['controller']=c;rows.append(context_line('PEDRO_CONTEXT_CANDIDATE ',item))
+                summary['controller']=c;rows.append(context_line('PEDRO_CONTEXT_SELECTION ',summary))
+        final=dict(final,status='CHECK' if case=='-' else 'PASS',dt='0');rows.append(context_line(v.CTX_TAG,final))
+    step('-','ProbeNavCapability','C0','None',900,[(0,0)]*6,mode='Disabled')
+    rows.append('PEDRO_AWARENESS_TEST status=RESET_EVIDENCE')
+    step('P01','ProbeFollow','C1','D1',1200,[(i*10,0) for i in range(11)],mode='FollowPlayer',active=True,purpose='Follow',request=1,goal=750)
+    step('P02','ProbeActivity','C1','D1',1200,[(100,0),(100,6),(100,12),(100,15.524),(100,15.524),(100,15.524)],mode='ObserveActivity',activity=True)
+    rows.append('PEDRO_AWARENESS_TEST status=RESET_EVIDENCE')
+    step('P03','ProbeWatchPoint','C2','D2',1000,[(i*15,0) for i in range(35)]+[(510,0)]*3,mode='TravelToWatchPoint',active=True,purpose='WatchPoint',request=2,goal=550,selection=1,watch='Primary')
+    rows.append('PEDRO_AWARENESS_TEST status=RESET_EVIDENCE')
+    step('P04','ProbeWithdrawal','C3','D3',180,[(i*-15,0) for i in range(17)]+[(-240,0)]*3,mode='Withdraw',purpose='Withdraw',request=3,goal=-270,withdraw=True)
+    rows.extend([v.CTX_TAG+'status=SUMMARY suite=context-probe passed=4 expected=4 result=PASS','LogCore: Engine exit requested']);return '\n'.join(rows)+'\n'
+
+
+class ContextVerifierTests(unittest.TestCase):
+    def sample(self,**kw):return v.ctx_sample(context_sample(**kw))
+    def reject(self,**kw):
+        with self.assertRaises(ValueError):self.sample(**kw)
+    def frames(self,**kw):
+        a=self.sample(now='10',dt='0');b=self.sample(now='10.1',dt='.1',**kw);return v.ctx_frame(a,b)
+    def test_valid_sample(self):self.assertEqual(self.sample()['mode'],'ObserveIdle')
+    def test_missing_field(self):
+        d=context_sample();del d['goal']
+        with self.assertRaises(ValueError):v.ctx_sample(d)
+    def test_duplicate_field(self):
+        with self.assertRaises(ValueError):v.ctx_fields(v.CTX_TAG+'status=FRAME status=PASS')
+    def test_nonfinite(self):self.reject(yaw='nan')
+    def test_malformed_boolean(self):self.reject(active='true')
+    def test_speed(self):self.reject(velocity='200,0,0')
+    def test_displacement(self):
+        with self.assertRaises(ValueError):self.frames(root='100,0,0')
+    def test_yaw_rate(self):
+        with self.assertRaises(ValueError):self.frames(yaw='90',attention=2)
+    def test_player_forced_move(self):
+        with self.assertRaises(ValueError):self.frames(actual='1100,0,0')
+    def test_player_damage(self):
+        with self.assertRaises(ValueError):self.frames(health='90')
+    def test_orphan_request(self):self.reject(id=7)
+    def test_missing_purpose(self):self.reject(active='yes',valid='yes',id=3,length=100,submissions=1)
+    def test_expired_plan(self):self.reject(active='yes',valid='yes',id=3,length=550,purpose='Follow',submissions=1,planTime=9,sightTime=8,goal='550,0,0',sighting='1000,0,0')
+    def test_personal_space(self):self.reject(active='yes',valid='yes',id=3,length=800,purpose='WatchPoint',routePoint='A',submissions=1,planTime=10,sightTime=9.9,goal='800,0,0',sighting='1000,0,0')
+    def test_hidden_activity(self):self.reject(event='1'*32,emitted='1'*32)
+    def test_hidden_interest(self):self.reject(lastEvent='1'*32,emitted='1'*32)
+    def test_activity_cap(self):self.reject(event='1'*32,emitted='1'*32,acquired='1'*32,evidence=1,activityAt=9,holdStart=9,expiry=13)
+    def test_adaptation_bound(self):self.reject(losses=33)
+    def test_query_bound(self):self.reject(attempts=6)
+    def test_score_valid(self):self.assertAlmostEqual(v.ctx_score(context_candidate()),66.25)
+    def test_score_forged(self):
+        a=context_candidate();a['score']='100';self.assertRaises(ValueError,v.ctx_score,a)
+    def test_score_nonfinite(self):
+        a=context_candidate();a['v']='nan';self.assertRaises(ValueError,v.ctx_score,a)
+    def test_selection_valid(self):self.assertEqual(v.ctx_selection(*context_selection())[0],'A')
+    def test_selection_duplicate(self):
+        a,b=context_selection();a.append(a[-1]);self.assertRaises(ValueError,v.ctx_selection,a,b)
+    def test_selection_no_improvement(self):
+        a,b=context_selection();a[1]=context_candidate(v=.2);self.assertRaises(ValueError,v.ctx_selection,a,b)
+    def test_selection_tie(self):
+        a,b=context_selection();a.append(context_candidate('B'));b.update(attempts='2',selected='B');self.assertRaises(ValueError,v.ctx_selection,a,b)
+    def test_false_satisfaction(self):
+        with self.assertRaises(ValueError):self.frames(mode='Satisfied')
+    def test_probe_valid(self):self.assertEqual(v.verify_context(context_probe_example(),'context-probe')['expected'],4)
+    def test_probe_process_exit(self):self.assertRaises(ValueError,v.verify_context,context_probe_example(),'context-probe',1)
+    def test_probe_missing_case(self):self.assertRaises(ValueError,v.verify_context,context_probe_example().replace('status=PASS case=P03','status=CHECK case=P03'),'context-probe')
+    def test_probe_fake_score(self):self.assertRaises(ValueError,v.verify_context,context_probe_example().replace('selectedScore=66.25 currentScore=40 selected=Primary','selectedScore=99 currentScore=40 selected=Primary'),'context-probe')
+    def test_probe_bad_event(self):self.assertRaises(ValueError,v.verify_context,context_probe_example().replace('trace=Visible location=1000,250,64','trace=Occluded location=1000,250,64'),'context-probe')
