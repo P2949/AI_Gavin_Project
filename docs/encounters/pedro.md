@@ -297,3 +297,38 @@ The following decisions are deliberately deferred until prototype work provides 
 - Exact HUD treatment;
 - Music/audio;
 - Exact encounter length beyond the rough short-prototype target.
+
+## Implementation status (2026-11-24)
+
+The design above records the original intent; the prototype scope and deferred decisions are historical, not a list of work still outstanding.
+
+- The production greybox is playable from the hub. Pedro autonomously notices, follows, observes activities, relocates to watch points, withdraws and becomes satisfied after completion.
+- The encounter-local integration actor manages activation and teardown; the Director owns evidence and completion; the AI controller owns perception, attention and movement. Unseen actions are not replayed, and lost sight does not expose the player's live position.
+- Four core inspections and one bonus opportunity are authored. Three distinct witnessed core samples resolve the encounter once. Repetition and bonus evidence do not add distinct core progress. A real melee hit on Pedro supplies nonlethal `DirectContact`, not visual knowledge or a core sample. Misses grant no evidence.
+- The provisional classifier supports Gentle, Seeking and Disruptive. Current inspection-based gameplay favors Seeking; the three outcomes are still placeholders. Session progress survives hub travel; unresolved reentry starts fresh and resolved reentry does not reactivate the observer.
+
+### Development and testing
+
+Use UE 5.8.2, materialized Git LFS assets and a clean or fully staged checkout. Run from the project root; close Unreal before automated validation. On the existing Linux/NixOS setup:
+
+```bash
+# Manual production play, starting in the hub
+unreal-engine "$PWD/AI_Gavin_Project.uproject" /Game/AI_Gavin/World/Hub/Maps/L_Hub_Prototype -game -log
+
+# Offline tests
+nix develop '/etc/nixos#default' --command python3 -B -m unittest discover -s Tools/PedroValidation/tests -q
+
+# Native and world regression; run the additional suites when relevant
+bash Tools/PedroValidation/validate.sh world all
+bash Tools/PedroValidation/validate.sh interaction production-rendered
+bash Tools/PedroValidation/validate.sh flow all
+bash Tools/PedroValidation/validate.sh maps verify-production
+```
+
+The validation entry point also supports `interaction test`, `test-rendered`, `production`, `maps verify-test`, and `legacy-map verify` (each with its corresponding suite). Reports are in `Saved/PedroValidation/`. Use the isolated validation maps for authoring experiments; do not regenerate accepted maps as routine testing. Automated fixtures use real components but are not physical-input tests.
+
+The pre-cleanup standalone prototype passed all 18 operator checks. After cleanup, 387 offline tests, 172 native tests in each compilation mode, 18 world processes, five interaction processes, eight flow processes and three saved-map audits passed. The old Linux Shipping package passed cooking, map inventory and process stability, but its startup map override did not load Pedro; packaged Pedro gameplay remains unverified. Detailed historical acceptance and the tested Vulkan workaround are archived outside the active documentation; do not reuse checkpoint-specific recovery kits as release tools.
+
+### Next gameplay work
+
+Add genuine NPC assistance, property interactions and simple puzzles; demonstrate all three interpretations through legitimate gameplay; give each outcome a distinct presentation, then tune scoring. Keep progression shared, behaviour encounter-local, and the original design goals intact.
