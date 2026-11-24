@@ -4,7 +4,7 @@
 #include "Misc/AutomationTest.h"
 #include <limits>
 
-namespace
+namespace PedroDirectObservationFixture
 {
 constexpr float Range = 1000.0f;
 constexpr float HalfAngle = 60.0f;
@@ -26,7 +26,7 @@ bool FPedroDirectAcceptsVisibleTest::RunTest(const FString& Parameters)
 {
     static_cast<void>(Parameters);
     TestTrue(TEXT("Ahead and inside range is geometrically visible"),
-        Check(FVector(300, 0, 0)) == EPedroDirectObservationStatus::Visible);
+        PedroDirectObservationFixture::Check(FVector(300, 0, 0)) == EPedroDirectObservationStatus::Visible);
     return true;
 }
 
@@ -37,7 +37,7 @@ bool FPedroDirectRejectsDistanceTest::RunTest(const FString& Parameters)
 {
     static_cast<void>(Parameters);
     TestTrue(TEXT("Outside range is rejected"),
-        Check(FVector(1001, 0, 0)) == EPedroDirectObservationStatus::TooFar);
+        PedroDirectObservationFixture::Check(FVector(1001, 0, 0)) == EPedroDirectObservationStatus::TooFar);
     return true;
 }
 
@@ -48,10 +48,10 @@ bool FPedroDirectRejectsAngleTest::RunTest(const FString& Parameters)
 {
     static_cast<void>(Parameters);
     TestTrue(TEXT("Behind observer is rejected"),
-        Check(FVector(-100, 0, 0)) ==
+        PedroDirectObservationFixture::Check(FVector(-100, 0, 0)) ==
             EPedroDirectObservationStatus::OutsideViewCone);
     TestTrue(TEXT("Off-axis is rejected"),
-        Check(FVector(100, 500, 0)) ==
+        PedroDirectObservationFixture::Check(FVector(100, 500, 0)) ==
             EPedroDirectObservationStatus::OutsideViewCone);
     return true;
 }
@@ -63,9 +63,9 @@ bool FPedroDirectBoundaryTest::RunTest(const FString& Parameters)
 {
     static_cast<void>(Parameters);
     TestTrue(TEXT("Exactly maximum distance is accepted"),
-        Check(FVector(1000, 0, 0)) == EPedroDirectObservationStatus::Visible);
+        PedroDirectObservationFixture::Check(FVector(1000, 0, 0)) == EPedroDirectObservationStatus::Visible);
     TestTrue(TEXT("Event at observer eye is accepted by geometry"),
-        Check(FVector::ZeroVector) == EPedroDirectObservationStatus::Visible);
+        PedroDirectObservationFixture::Check(FVector::ZeroVector) == EPedroDirectObservationStatus::Visible);
     return true;
 }
 
@@ -76,7 +76,8 @@ bool FPedroDirectFullCircleTest::RunTest(const FString& Parameters)
 {
     static_cast<void>(Parameters);
     TestTrue(TEXT("180-degree half-angle allows behind"),
-        Check(FVector(-100, 0, 0), Range, 180.0f) ==
+        PedroDirectObservationFixture::Check(
+            FVector(-100, 0, 0), PedroDirectObservationFixture::Range, 180.0f) ==
             EPedroDirectObservationStatus::Visible);
     return true;
 }
@@ -88,13 +89,13 @@ bool FPedroDirectInvalidSettingsTest::RunTest(const FString& Parameters)
 {
     static_cast<void>(Parameters);
     TestTrue(TEXT("Zero distance rejects"),
-        Check(FVector(100, 0, 0), 0.0f) ==
+        PedroDirectObservationFixture::Check(FVector(100, 0, 0), 0.0f) ==
             EPedroDirectObservationStatus::InvalidSettings);
     TestTrue(TEXT("Oversized angle rejects"),
-        Check(FVector(100, 0, 0), Range, 181.0f) ==
+        PedroDirectObservationFixture::Check(FVector(100, 0, 0), PedroDirectObservationFixture::Range, 181.0f) ==
             EPedroDirectObservationStatus::InvalidSettings);
     TestTrue(TEXT("Negative angle rejects"),
-        Check(FVector(100, 0, 0), Range, -1.0f) ==
+        PedroDirectObservationFixture::Check(FVector(100, 0, 0), PedroDirectObservationFixture::Range, -1.0f) ==
             EPedroDirectObservationStatus::InvalidSettings);
     return true;
 }
@@ -108,10 +109,10 @@ bool FPedroDirectNonFiniteTest::RunTest(const FString& Parameters)
     const float Infinity = std::numeric_limits<float>::infinity();
     const float NaN = std::numeric_limits<float>::quiet_NaN();
     TestTrue(TEXT("Infinite distance rejects"),
-        Check(FVector(100, 0, 0), Infinity) ==
+        PedroDirectObservationFixture::Check(FVector(100, 0, 0), Infinity) ==
             EPedroDirectObservationStatus::InvalidSettings);
     TestTrue(TEXT("NaN view angle rejects"),
-        Check(FVector(100, 0, 0), Range, NaN) ==
+        PedroDirectObservationFixture::Check(FVector(100, 0, 0), PedroDirectObservationFixture::Range, NaN) ==
             EPedroDirectObservationStatus::InvalidSettings);
     return true;
 }
@@ -124,7 +125,9 @@ bool FPedroDirectZeroForwardTest::RunTest(const FString& Parameters)
     static_cast<void>(Parameters);
     TestTrue(TEXT("Zero facing vector fails closed"),
         PedroDirectObservation::CheckGeometry(
-            TestEyeLocation, FVector::ZeroVector, FVector(100, 0, 0), Range, HalfAngle) ==
+            PedroDirectObservationFixture::TestEyeLocation, FVector::ZeroVector,
+            FVector(100, 0, 0), PedroDirectObservationFixture::Range,
+            PedroDirectObservationFixture::HalfAngle) ==
             EPedroDirectObservationStatus::InvalidGeometry);
     return true;
 }

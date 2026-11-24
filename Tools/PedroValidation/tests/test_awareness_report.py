@@ -12,7 +12,7 @@ import b2b6a_audit as audit
 
 def native_report():
     return dict(tests=[dict(fullTestPath=n,state='Success',warnings=0,errors=0) for n in sorted(v.NATIVE_NAMES)],
-                succeeded=165,succeededWithWarnings=0,failed=0,notRun=0,inProcess=0)
+                succeeded=172,succeededWithWarnings=0,failed=0,notRun=0,inProcess=0)
 
 
 def example_log(suite):
@@ -56,7 +56,7 @@ def example_log(suite):
     return '\n'.join(rows)+'\n'
 
 class NativeTests(unittest.TestCase):
-    def test_valid(self): self.assertEqual(v.native(native_report())['total'],165)
+    def test_valid(self): self.assertEqual(v.native(native_report())['total'],172)
     def test_missing(self):
         r=native_report();r['tests'].pop()
         with self.assertRaises(ValueError): v.native(r)
@@ -73,11 +73,11 @@ class NativeTests(unittest.TestCase):
         r=native_report();r['notRun']=1
         with self.assertRaises(ValueError):v.native(r)
     def test_process_failure(self):
-        with self.assertRaisesRegex(ValueError,'all 165 native tests passed, but native process exit 1'):v.native(native_report(),1)
+        with self.assertRaisesRegex(ValueError,'all 172 native tests passed, but native process exit 1'):v.native(native_report(),1)
     def test_process_failure_diagnostics(self):
         text=v.native_diagnostics(native_report(),1)
         self.assertIn('Native process exit: 1',text)
-        self.assertIn('"succeeded": 165',text)
+        self.assertIn('"succeeded": 172',text)
         self.assertNotIn('Native test diagnostic:',text)
     def test_failed_assertion_diagnostics(self):
         report=native_report();report['tests'][0].update(state='Fail',errors=1,entries=[{'event':{'message':'actual assertion'}}])
@@ -191,7 +191,7 @@ class UnityTests(unittest.TestCase):
     def write(self,blob,sources):
         blob.write_text(''.join(f'#include "{self.project/name}"\n' for name in sources))
     def verify(self,log=None,rc=0):return v.verify_unity(self.log if log is None else log,self.project,rc)
-    def test_unity_valid(self):self.assertEqual(len(self.verify()['source_membership']),12)
+    def test_unity_valid(self):self.assertEqual(len(self.verify()['source_membership']),17)
     def test_unity_split(self):
         self.write(self.blob,v.UNITY_SOURCES[:2]);self.write(self.dir/'Module.AI_Gavin_Project.2.cpp',v.UNITY_SOURCES[2:])
         self.assertEqual(len(self.verify(self.log.replace('[2/2] Link','[2/3] Compile [x64] Module.AI_Gavin_Project.2.cpp\n[3/3] Link'))['compiled_blobs']),2)
@@ -402,7 +402,7 @@ class AttentionReportTests(unittest.TestCase):
 class NonUnityTests(unittest.TestCase):
     def setUp(self):
         self.log='Running command : UBT -DisableUnity -DisableAdaptiveUnity -gather\n'+''.join(f'[{i+1}/13] Compile {Path(s).name}\n' for i,s in enumerate(v.UNITY_SOURCES))+'[13/13] Link libUnrealEditor-AI_Gavin_Project.so\nResult: Succeeded\n'
-    def test_valid(self):self.assertEqual(v.verify_non_unity(self.log,0)['expected'],12)
+    def test_valid(self):self.assertEqual(v.verify_non_unity(self.log,0)['expected'],17)
     def test_missing_source(self):
         with self.assertRaises(ValueError):v.verify_non_unity(self.log.replace('Compile PedroAttentionPolicy.cpp','Mention PedroAttentionPolicy.cpp'),0)
     def test_unity_contamination(self):

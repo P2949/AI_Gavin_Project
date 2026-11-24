@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
 # Pedro awareness, attention and navigation: committed mechanical validation. No temporary native TU or asset writes.
 set -euo pipefail
-PROJECT=${PROJECT:-$HOME/Development/Unreal/Projects/AI_Gavin_Project}
-ENGINE=${ENGINE:-$HOME/Development/Unreal/Engines/UE_5.8.2}
 MODE=${1:-all}
-case "$MODE" in all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|context-probe|context|context-integration|rendered|unity|probe) ;; *) echo "Usage: $0 [all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|context-probe|context|context-integration|rendered|unity|probe]" >&2; exit 2;; esac
+case "$MODE" in all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|context-probe|context|context-integration|playable|playable-rendered|playable-test|playable-test-rendered|rendered|unity|probe) ;; *) echo "Usage: $0 [all|unit|world|integration|attention|attention-integration|navigation-probe|navigation|navigation-integration|context-probe|context|context-integration|rendered|unity|probe]" >&2; exit 2;; esac
 [[ $# -le 1 ]] || exit 2
-cd "$PROJECT"
-PROJECT=$PWD
-ENGINE=$(realpath "$ENGINE")
-NIX=(nix develop '/etc/nixos#default' --command)
-UE="$ENGINE/Engine/Binaries/Linux/UnrealEditor"
-BUILD="$ENGINE/Engine/Build/BatchFiles/Linux/Build.sh"
-DESCRIPTOR="$PROJECT/AI_Gavin_Project.uproject"
+source "$(dirname -- "${BASH_SOURCE[0]}")/runner_common.sh"
+pedro_init build
 MAP='/Game/AI_Gavin/Encounters/Pedro/Validation/L_Pedro_ObserverActorTest'
+PLAYABLE_PRODUCTION='/Game/AI_Gavin/Encounters/Pedro/Maps/L_Pedro_Prototype'
+PLAYABLE_TEST='/Game/AI_Gavin/Encounters/Pedro/Validation/B2b6e/L_Pedro_AutonomousTest'
+case "$MODE" in
+    playable-test|playable-test-rendered) PLAYABLE_MAP="$PLAYABLE_TEST" ;;
+    *) PLAYABLE_MAP="$PLAYABLE_PRODUCTION" ;;
+esac
+if [[ -n "${PEDRO_PLAYABLE_MAP:-}" && "$PEDRO_PLAYABLE_MAP" != "$PLAYABLE_MAP" ]]; then
+    echo "STOP: $MODE requires exact map $PLAYABLE_MAP (not $PEDRO_PLAYABLE_MAP)" >&2; exit 2
+fi
+case "$MODE" in
+    playable|playable-rendered|playable-test|playable-test-rendered|all|rendered)
+        playable_disk="Content/${PLAYABLE_MAP#/Game/}.umap"
+        [[ -f "$playable_disk" ]] || { echo "STOP: missing saved playable map: $playable_disk" >&2; exit 1; }
+        ;;
+esac
 TOOLS='Tools/PedroValidation'
 AUDIT="$TOOLS/b2b6a_audit.py"
 VERIFY="$TOOLS/verify_awareness_report.py"
-export PYTHONDONTWRITEBYTECODE=1
-[[ -x "$UE" && -f "$BUILD" && -f "$DESCRIPTOR" ]] || { echo 'STOP: Engine or descriptor missing.' >&2; exit 1; }
-mkdir -p Saved/PedroValidation
-# Shared advisory lock for all invocations of this kit in this checkout.
-exec 9>Saved/PedroValidation/b2b6a.lock
-flock -n 9 || { echo 'STOP: Another Pedro validation runner is active.' >&2; exit 1; }
-run_nix() { "${NIX[@]}" "$@" 9>&-; }
-if pgrep -u "$(id -u)" -f '/Engine/Binaries/Linux/UnrealEditor(-Cmd)?([[:space:]]|$)' >/dev/null; then
-    echo 'STOP: Close all Unreal Editor/game instances.' >&2; exit 1
-fi
+pedro_lock
 RUN=$(mktemp -d "$PROJECT/Saved/PedroValidation/b2b6a-$MODE-XXXXXXXX")
 printf '%s\n' "$RUN" > Saved/PedroValidation/b2b6a-latest.txt
 printf '%s\n' "$RUN" > "Saved/PedroValidation/b2b6a-$MODE-latest.txt"
@@ -42,12 +41,7 @@ finalize() {
     set +e
     if (( PREPARED )); then
         run_nix python3 -B "$AUDIT" --snapshot "$RUN" after > "$RUN/snapshot-after.log" 2>&1 || rc=1
-        cmp -s "$RUN/status-before.txt" "$RUN/status-after.txt" || { echo 'FAIL: Git status changed.' >&2; rc=1; }
-        if ! cmp -s "$RUN/files-before.sha256" "$RUN/files-after.sha256"; then
-            echo 'FAIL: Working-tree file hashes changed. No rollback attempted.' >&2
-            diff -u "$RUN/files-before.sha256" "$RUN/files-after.sha256" > "$RUN/file-differences.txt" || true
-            rc=1
-        fi
+        verify_readonly_snapshot "$RUN" || rc=1
         run_nix python3 -B "$AUDIT" > "$RUN/audit-after.log" 2>&1 || rc=1
         git lfs fsck > "$RUN/lfs-fsck.log" 2>&1 || rc=1
         if (( rc == 0 )); then complete repository-audit; fi
@@ -56,28 +50,13 @@ finalize() {
 import json,sys
 from pathlib import Path
 p=Path(sys.argv[1]);mode=sys.argv[2];rc=int(sys.argv[3]);stages=(p/'completed.txt').read_text().splitlines()
-common=['preflight','engine-inspection','offline-tests','snapshot-before']
-expected={'probe':common,'unit':common+['non-unity-build','native'],
-          'world':common+['ordinary-build','world'],
-          'integration':common+['ordinary-build','integration'],
-          'attention':common+['ordinary-build','attention'],
-          'attention-integration':common+['ordinary-build','attention-integration'],
-          'navigation-probe':common+['non-unity-build','navigation-probe'],
-          'navigation':common+['ordinary-build','navigation'],
-          'navigation-integration':common+['ordinary-build','navigation-integration'],
-          'context-probe':common+['non-unity-build','context-probe'],
-          'context':common+['ordinary-build','context'],
-          'context-integration':common+['ordinary-build','context-integration'],
-          'rendered':common+['ordinary-build','rendered-world','rendered-integration','rendered-attention','rendered-attention-integration','rendered-navigation','rendered-navigation-integration','rendered-context','rendered-context-integration'],
-          'unity':common+['forced-unity-build','native-unity'],
-          'all':common+['non-unity-build','native','world','integration','attention','attention-integration','navigation','navigation-integration','context','context-integration','rendered-world','rendered-integration','rendered-attention','rendered-attention-integration','rendered-navigation','rendered-navigation-integration','rendered-context','rendered-context-integration','forced-unity-build','native-unity']}[mode]+['repository-audit']
-passed=(rc==0 and stages==expected)
+sys.path.insert(0, str(Path.cwd()/'Tools/PedroValidation'))
+from b2b6e_contract import expected_stages, check_full_acceptance
+expected=expected_stages(mode)
 reports={}
 for q in sorted(p.glob('*/results.json')):
     reports[q.parent.name]=str(q.relative_to(p))
-if mode=='all':
-    runtime=['world','integration','attention','attention-integration','navigation','navigation-integration','context','context-integration']
-    passed=passed and set(reports)==set(['non-unity','unity','native','native-unity']+runtime+['rendered-'+r for r in runtime])
+passed=check_full_acceptance(mode,rc,stages,set(reports))
 summary={'status':'PASS' if passed else 'FAIL','mode':mode,'exit_status':0 if passed else max(rc,1),
          'completed_stages':stages,'expected_stages':expected,'verified_reports':reports,
          'full_acceptance':passed and mode=='all'}
@@ -114,11 +93,15 @@ run_nix python3 -B - "$TOOLS" <<'PY'
 import sys
 from pathlib import Path
 root=Path(sys.argv[1])
-for name in ['b2b6a_audit.py','verify_awareness_report.py','tests/test_awareness_report.py']:
+for name in ['b2b6a_audit.py','verify_awareness_report.py','tests/test_awareness_report.py',
+             'verify_playable_smoke.py','tests/test_playable_smoke.py',
+             'tests/test_playable_protocol.py','b2b6e_saved_map_audit.py',
+             'b2b6e_contract.py','b2b6e_editor_common.py','b2b6e_author_level.py',
+             'b2b6e_write_scope.py','tests/test_b2b6e_mechanical.py']:
     p=root/name;compile(p.read_bytes(),str(p),'exec')
 print('PASS: Python source syntax')
 PY
-run_nix python3 -B -m unittest discover -s "$TOOLS/tests" -p test_awareness_report.py -v 2>&1 | tee "$RUN/offline-tests.log"
+run_nix python3 -B -m unittest discover -s "$TOOLS/tests" -p "test*.py" -v 2>&1 | tee "$RUN/offline-tests.log"
 complete offline-tests
 run_nix python3 -B "$AUDIT" --snapshot "$RUN" before > "$RUN/snapshot-before.log"
 PREPARED=1
@@ -143,12 +126,6 @@ build() {
     fi
     complete "$label"
 }
-check_fatal() {
-    local file=$1
-    if grep -Ein 'Fatal error:|Assertion failed:|Ensure condition failed:|Unhandled Exception:|Signal 11 caught|Segmentation fault' "$file"; then
-        echo "FAIL: fatal/assert/ensure in $file" >&2; return 1
-    fi
-}
 native() {
     local label=$1 dir="$RUN/$1" rc=0
     mkdir -p "$dir"
@@ -170,9 +147,9 @@ native() {
 }
 runtime() {
     local suite=$1 label=$2 render=$3 dir="$RUN/$2" rc=0 flag
-    local rhi=(-nullrhi)
+    local rhi=(-nullrhi) map="$MAP"
     [[ "$render" == yes ]] && rhi=()
-    local pacing=() navconfig=()
+    local pacing=() navconfig=() playable_arg=()
     case "$suite" in
         world) flag=-PedroAwarenessWorld ;;
         integration) flag=-PedroAwarenessIntegration ;;
@@ -182,6 +159,7 @@ runtime() {
         navigation) flag=-PedroNavigationWorld; pacing=('-ExecCmds=t.MaxFPS 120') ;;
         navigation-integration) flag=-PedroNavigationIntegration; pacing=('-ExecCmds=t.MaxFPS 120') ;;
         context-probe) flag=-PedroContextProbe; pacing=('-ExecCmds=t.MaxFPS 120') ;;
+        playable|playable-test) flag=-PedroPlayableSmoke; map="$PLAYABLE_MAP"; pacing=('-ExecCmds=t.MaxFPS 120'); playable_arg=("-PedroPlayableExpectedMap=$PLAYABLE_MAP") ;;
         context) flag=-PedroContextWorld; pacing=('-ExecCmds=t.MaxFPS 120') ;;
         context-integration) flag=-PedroContextIntegration; pacing=('-ExecCmds=t.MaxFPS 120') ;;
         *) return 1 ;;
@@ -193,15 +171,21 @@ runtime() {
     fi
     mkdir -p "$dir"
     echo "=== Runtime suite $label ==="
-    run_nix timeout --kill-after=15s 420s steam-run "$UE" "$DESCRIPTOR" "$MAP" \
-        -game "${rhi[@]}" -unattended -nosound -nop4 -nosplash -log "$flag" "${pacing[@]}" "${navconfig[@]}" \
+    run_nix timeout --kill-after=15s 420s steam-run "$UE" "$DESCRIPTOR" "$map" \
+        -game "${rhi[@]}" -unattended -nosound -nop4 -nosplash -log "$flag" "${pacing[@]}" "${navconfig[@]}" "${playable_arg[@]}" \
         "-abslog=$dir/game.log" > "$dir/terminal.log" 2>&1 || rc=$?
     printf '%s\n' "$rc" > "$dir/exit-status.txt"
     if [[ ! -s "$dir/game.log" ]]; then tail -n 80 "$dir/terminal.log"; return 1; fi
-    grep -E 'PEDRO_CONTEXT_|PEDRO_NAV_TEST|PEDRO_NAV_FIXTURE|PEDRO_ATTENTION_TEST|PEDRO_AWARENESS_TEST|PEDRO_AWARENESS_FIXTURE|PEDRO_DIRECT|PEDRO_SHADOW|PEDRO_OUTCOME|Engine exit requested' "$dir/game.log" > "$dir/events.txt" || true
+    grep -E 'PEDRO_CONTEXT_|PEDRO_NAV_TEST|PEDRO_NAV_FIXTURE|PEDRO_ATTENTION_TEST|PEDRO_AWARENESS_TEST|PEDRO_AWARENESS_FIXTURE|PEDRO_PLAYABLE_TEST|PEDRO_PLAYABLE_CONFIGURATION|PEDRO_DIRECT|PEDRO_SHADOW|PEDRO_OUTCOME|Engine exit requested' "$dir/game.log" > "$dir/events.txt" || true
     grep -Ev 'PEDRO_(ATTENTION|NAV|CONTEXT)_TEST status=FRAME ' "$dir/events.txt" || true
     check_fatal "$dir/game.log"
-    if ! run_nix python3 -B "$VERIFY" "$suite" "$dir/game.log" "$rc" "$dir/results.json" 2>&1 | tee "$dir/verification.txt"; then
+    local verifier=("$VERIFY" "$suite")
+    local playable_verify_args=()
+    if [[ "$suite" == playable || "$suite" == playable-test ]]; then
+        verifier=("$TOOLS/verify_playable_smoke.py")
+        playable_verify_args=("$map")
+    fi
+    if ! run_nix python3 -B "${verifier[@]}" "$dir/game.log" "$rc" "$dir/results.json" "${playable_verify_args[@]}" 2>&1 | tee "$dir/verification.txt"; then
         tail -n 80 "$dir/game.log"; return 1
     fi
     complete "$label"
@@ -220,7 +204,10 @@ touch_sources() {
         Source/AI_Gavin_Project/Encounters/Pedro/PedroContextPolicy.cpp \
         Source/AI_Gavin_Project/Encounters/Pedro/PedroObserverWatchPoint.cpp \
         Source/AI_Gavin_Project/Encounters/Pedro/PedroEncounterDirector.cpp \
-        Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroContextTests.cpp
+        Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroContextTests.cpp \
+        Source/AI_Gavin_Project/Encounters/Pedro/PedroPlayableIntegrationActor.cpp \
+        Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroPlayableIntegrationTests.cpp \
+        Source/AI_Gavin_Project/Encounters/Pedro/Tests/PedroPlayableSmoke.cpp
 }
 # Do not let an existing UBT action graph survive an explicit build-mode switch.
 # Keep generated project build state recoverable, outside the report archive.
@@ -311,7 +298,11 @@ case "$MODE" in
     context-probe) runtime context-probe context-probe no ;;
     context) runtime context context no ;;
     context-integration) runtime context-integration context-integration no ;;
-    rendered) runtime world rendered-world yes; runtime integration rendered-integration yes; runtime attention rendered-attention yes; runtime attention-integration rendered-attention-integration yes; runtime navigation rendered-navigation yes; runtime navigation-integration rendered-navigation-integration yes; runtime context rendered-context yes; runtime context-integration rendered-context-integration yes ;;
+    playable) runtime playable playable no ;;
+    playable-rendered) runtime playable rendered-playable yes ;;
+    playable-test) runtime playable-test playable-test no ;;
+    playable-test-rendered) runtime playable-test rendered-playable-test yes ;;
+    rendered) runtime world rendered-world yes; runtime integration rendered-integration yes; runtime attention rendered-attention yes; runtime attention-integration rendered-attention-integration yes; runtime navigation rendered-navigation yes; runtime navigation-integration rendered-navigation-integration yes; runtime context rendered-context yes; runtime context-integration rendered-context-integration yes; runtime playable rendered-playable yes ;;
     all)
         native native
         runtime world world no
@@ -322,6 +313,7 @@ case "$MODE" in
         runtime navigation-integration navigation-integration no
         runtime context context no
         runtime context-integration context-integration no
+        runtime playable playable no
         runtime world rendered-world yes
         runtime integration rendered-integration yes
         runtime attention rendered-attention yes
@@ -330,6 +322,7 @@ case "$MODE" in
         runtime navigation-integration rendered-navigation-integration yes
         runtime context rendered-context yes
         runtime context-integration rendered-context-integration yes
+        runtime playable rendered-playable yes
         forced_unity
         native native-unity
         ;;
