@@ -4,10 +4,13 @@
 #include "Encounters/Pedro/PedroDirectObservation.h"
 #include "Encounters/Pedro/PedroObservationSourceComponent.h"
 #include "Encounters/Pedro/PedroObserverAIController.h"
+#include "Encounters/Pedro/PedroObserverCharacter.h"
 #include "Engine/GameInstance.h"
+#include "Engine/HitResult.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
@@ -358,6 +361,66 @@ void APedroEncounterDirector::BeginPlay()
     InteractionComponent->OnInteractionDispatched.AddDynamic(
         this,
         &APedroEncounterDirector::HandleInteractionDispatched);
+}
+
+bool APedroEncounterDirector::IsEncounterProgressResolved() const
+{
+    UWorld* World = GetWorld();
+    UGameInstance* Game = World ? World->GetGameInstance() : nullptr;
+    UEncounterProgressSubsystem* Progress = Game
+        ? Game->GetSubsystem<UEncounterProgressSubsystem>() : nullptr;
+    return IsValid(EncounterDefinition) && IsValid(Progress) &&
+        Progress->IsEncounterResolved(EncounterDefinition);
+}
+
+bool APedroEncounterDirector::ReceiveVerifiedObserverMeleeHit(
+    APawn* Player, APedroObserverCharacter* HitObserver, const FHitResult& Hit)
+{
+    UWorld* World = GetWorld();
+    APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+    auto* ObserverController = IsValid(HitObserver)
+        ? Cast<APedroObserverAIController>(HitObserver->GetController()) : nullptr;
+    if (!World || !IsValid(Player) || !IsValid(PC) || PC->GetPawn() != Player ||
+        !Player->IsPlayerControlled() || Player->GetWorld() != World ||
+        !IsValid(HitObserver) || HitObserver->GetWorld() != World ||
+        HitObserver != DirectObservationActor.Get() ||
+        !IsValid(ObserverController) || ObserverController->GetPawn() != HitObserver ||
+        CompletionPolicy != EPedroCompletionPolicy::EvidenceDriven ||
+        !bUseDirectObservationAcquisition || bUsePrototypeAssumedAcquisition ||
+        bHasPresentedOutcome || IsEncounterProgressResolved() ||
+        !Hit.bBlockingHit || Hit.GetActor() != HitObserver ||
+        Hit.ImpactPoint.ContainsNaN() || Hit.TraceStart.ContainsNaN() ||
+        FVector::Dist(Hit.TraceStart, Hit.ImpactPoint) > 350.0f)
+        return false;
+
+    // This world fact is generated ONLY after an actual melee sweep hit.
+    // A sword hit on Pedro is felt, including when visually behind him.
+    // No ordinary unseen actions gain this provenance and no hidden player
+    // transform enters the AI awareness state.
+    FPedroBehaviourEvent Event;
+    Event.EventId = FGuid::NewGuid();
+    Event.Kind = EPedroEvidenceKind::AttackedObserver;
+    Event.SubjectActor = HitObserver;
+    Event.SubjectId = FName(TEXT("PedroObserver"));
+    Event.OpportunityId = NAME_None;
+    Event.EventLocation = Hit.ImpactPoint;
+    Event.WorldTimeSeconds = World->GetTimeSeconds();
+
+    FPedroEvidenceRecord Evidence;
+    Evidence.Event = Event;
+    Evidence.KnowledgeSource = EPedroKnowledgeSource::DirectContact;
+    Evidence.AcquiredAtWorldTimeSeconds = Event.WorldTimeSeconds;
+    if (!ObservationState.RecordEvidence(Evidence)) return false;
+
+    // Contact direction is the fixed weapon trace origin at impact time;
+    // it is not a current/continuously tracked player location.
+    ObserverController->ReceiveVerifiedContact(this, Evidence, Hit.TraceStart);
+    QueueShadowCompletionEvaluation();
+    QueueActiveCompletionEvaluation();
+    UE_LOG(LogTemp, Display,
+        TEXT("PEDRO_CONTACT accepted=yes event=%s provenance=DirectContact opportunity=None"),
+        *Event.EventId.ToString(EGuidFormats::Digits));
+    return true;
 }
 
 void APedroEncounterDirector::DiscoverLevelObservationSources()

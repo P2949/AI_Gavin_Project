@@ -475,6 +475,34 @@ void APedroObserverAIController::ReceiveContextEvidence(const APedroEncounterDir
     if(Now-Awareness.LastSuccessfulSightingTime>=NavigationSettings.HoldAge)return;
     if(PedroContextPolicy::AcceptActivity(ContextMemory,R,Awareness.LastKnownPlayerLocation,Now,ContextSettings))NextContextEvaluation=0;
 }
+void APedroObserverAIController::ReceiveVerifiedContact(
+    const APedroEncounterDirector* D, const FPedroEvidenceRecord& R,
+    const FVector& FixedTraceOrigin)
+{
+    if (!IsContextualObservationRunning() || ContextDirector.Get() != D ||
+        ContextMemory.bSatisfied ||
+        R.KnowledgeSource != EPedroKnowledgeSource::DirectContact ||
+        R.Event.Kind != EPedroEvidenceKind::AttackedObserver ||
+        R.Event.SubjectActor.Get() != GetPawn() || !R.Event.OpportunityId.IsNone() ||
+        !R.Event.EventId.IsValid() || ContextMemory.SeenEvents.Contains(R.Event.EventId) ||
+        ContextMemory.SeenEvents.Num() >= 4096 ||
+        !PedroContextPolicy::ValidPoint(FixedTraceOrigin) || !IsValid(GetPawn()) ||
+        FVector::Dist(GetPawn()->GetActorLocation(), FixedTraceOrigin) > 350.0f)
+        return;
+    UWorld* W = GetWorld();
+    const APlayerController* PC = W ? W->GetFirstPlayerController() : nullptr;
+    if (!PC || !ContextPlayer.IsValid() || PC->GetPawn() != ContextPlayer.Get()) return;
+    const double Now = W->GetTimeSeconds();
+    if (!FMath::IsFinite(Now) || Now < 0 ||
+        FMath::Abs(Now - R.Event.WorldTimeSeconds) > .35) return;
+    ContextMemory.SeenEvents.Add(R.Event.EventId);
+    ContextMemory.bAttackPending = true;
+    ContextMemory.AttackAt = Now;
+    ContextMemory.ContactAt = Now;
+    ContextMemory.ContactLocation = FixedTraceOrigin;
+    NextContextEvaluation = 0;
+}
+
 void APedroObserverAIController::ReceiveContextResolution(const APedroEncounterDirector* D)
 {
     if(!bContextEnabled||ContextDirector.Get()!=D||!IsValid(D)||!D->HasCommittedContextResolution())return;
@@ -508,6 +536,10 @@ void APedroObserverAIController::UpdateContext()
     if(ContextPlayer.Get()!=Player||(!Player&&ContextPlayer.IsStale())){CancelPedroMove();ResetContextMemory();ContextPlayer=Player;ContextMemory.bSatisfied=ContextDirector->HasCommittedContextResolution();++ContextGeneration;}
     FPedroContextInput I;I.bEnabled=true;I.bValid=true;I.Now=Now;I.StartDistance=N.StartDistance;I.Known=Awareness.LastKnownPlayerLocation;
     const double Age=Now-Awareness.LastSuccessfulSightingTime;
+    // A physical strike supplies fixed, short-lived contact direction; it is
+    // never written into native sight or last-known visual awareness.
+    const bool bContactRetain = PedroContextPolicy::HasPendingContactWithin(
+        ContextMemory, Now, N.HoldAge);
     I.bRecent=IsValid(Player)&&Awareness.ObservedPlayer.Get()==Player&&Awareness.bHasLastKnownPlayerLocation&&Awareness.Status!=EPedroAwarenessStatus::Unaware&&PedroContextPolicy::ValidPoint(I.Known)&&Age>=0&&Age<N.HoldAge;
     I.bFresh=I.bRecent&&Age<=N.FreshAge&&Awareness.Status==EPedroAwarenessStatus::Perceived;
     I.Observer=GetPawn()->GetActorLocation();I.Distance=FVector::Dist2D(I.Observer,I.Known);
@@ -518,13 +550,15 @@ void APedroObserverAIController::UpdateContext()
     bool bInvalidPoint=false;
     for(const auto& P:ContextPoints)if(P.IsValid()&&P->WatchPointId==ContextMemory.CurrentPoint&&P->IsUsable()&&FVector::Dist2D(GetPawn()->GetActorLocation(),P->GetActorLocation())<=N.ProjectionXY+N.AcceptanceRadius+10){I.bAtPoint=true;break;}
     if(I.bWatchActive){bInvalidPoint=true;for(const auto& P:ContextPoints)if(P.IsValid()&&P->WatchPointId==MovePoint&&P->IsUsable()&&FVector::Dist2D(P->GetActorLocation(),MoveGoal)<=N.ProjectionXY+1&&FMath::Abs(P->GetActorLocation().Z-MoveGoal.Z)<=N.ProjectionZ+1){bInvalidPoint=false;break;}}
+    if (I.bWithdrawActive && bContactRetain && !I.bFresh)
+        I.Known = ContextMemory.ContactLocation;
     bool bUnsafeUpdatedPath=false;
     if((I.bWatchActive||I.bWithdrawActive)&&I.bFresh&&OwnedPath.IsValid()&&FVector::Dist2D(I.Known,NavIntent.Sighting)>1)
     {
         const auto& Points=OwnedPath->GetPathPoints();for(int32 J=1;J<Points.Num();++J)
         {if(!PedroNavigationPolicy::IsSafeSegment(Points[J-1].Location,Points[J].Location,I.Known,N.PersonalSpace,I.bWithdrawActive)){bUnsafeUpdatedPath=true;break;}}
     }
-    if((I.bWatchActive||I.bWithdrawActive)&&(!I.bFresh||bInvalidPoint||bUnsafeUpdatedPath||FVector::Dist2D(I.Known,NavIntent.Sighting)>=N.ReplanDisplacement||(I.bWatchActive&&I.Distance<N.PersonalSpace)))
+    if((I.bWatchActive||I.bWithdrawActive)&&((!I.bFresh && !(I.bWithdrawActive && bContactRetain))||bInvalidPoint||bUnsafeUpdatedPath||FVector::Dist2D(I.Known,NavIntent.Sighting)>=N.ReplanDisplacement||(I.bWatchActive&&I.Distance<N.PersonalSpace)))
     {
         const auto Purpose=MovePurpose;const FName Point=MovePoint;CancelPedroMove();ContextMoveEnded(Purpose,Point,false,Now);I.bWatchActive=I.bWithdrawActive=false;
     }
@@ -539,6 +573,17 @@ void APedroObserverAIController::UpdateContext()
     if(!bUrgent&&!(bPointDue&&IsWatchMode(Context.Mode))&&Now<NextContextEvaluation)return;
     NextContextEvaluation=Now+S.Interval;
     auto D=PedroContextPolicy::Select(I,ContextMemory,Context,S);
+    // Contact authorizes only a bounded defensive withdrawal; never following
+    // or watch selection based on an unseen player's current transform.
+    if (!I.bFresh && bContactRetain &&
+        (ContextMemory.bAttackPending || I.bWithdrawActive) &&
+        !ContextMemory.bSatisfied)
+    {
+        D.Mode = CMode::Withdraw;
+        D.Reason = EPedroContextReason::Close;
+        D.MovementIntent = CMove::Withdraw;
+        D.AttentionIntent = EPedroContextAttentionIntent::Default;
+    }
     if(bPointDue&&IsWatchMode(D.Mode))
     {
         NextPointEvaluation=Now+S.PointInterval;I.bCanWatch=TrySelectWatchPoint(I);
@@ -624,8 +669,16 @@ bool APedroObserverAIController::UpdateContextNavigation(double Now)
     if(Context.MovementIntent==Move::Stop){CancelPedroMove();Navigation={Mode::Idle,Reason::InBand,false};return true;}
     const auto Purpose=Context.MovementIntent==Move::WatchPoint?EPedroMovePurpose::WatchPoint:EPedroMovePurpose::Withdraw;
     if(NavIntent.bActive&&MovePurpose==Purpose){Navigation={Mode::FollowObserved,Reason::Fresh,false};return true;}
-    if(Awareness.Status!=EPedroAwarenessStatus::Perceived||!Awareness.bHasLastKnownPlayerLocation||Awareness.ObservedPlayer.Get()!=ContextPlayer.Get()||Now-Awareness.LastSuccessfulSightingTime>NavigationSettings.FreshAge||Now<NavIntent.RetryAfter||Now-Awareness.LastSuccessfulSightingTime<0)return true;
-    const FVector Known=Awareness.LastKnownPlayerLocation;FVector Goal;FNavPathSharedPtr Path;
+    const bool bVisualFresh = Awareness.Status==EPedroAwarenessStatus::Perceived &&
+        Awareness.bHasLastKnownPlayerLocation && Awareness.ObservedPlayer.Get()==ContextPlayer.Get() &&
+        Now-Awareness.LastSuccessfulSightingTime>=0 &&
+        Now-Awareness.LastSuccessfulSightingTime<=NavigationSettings.FreshAge;
+    const bool bContactFresh = Purpose == EPedroMovePurpose::Withdraw &&
+        PedroContextPolicy::HasPendingContactWithin(
+            ContextMemory, Now, NavigationSettings.FreshAge);
+    if ((!bVisualFresh && !bContactFresh) || Now<NavIntent.RetryAfter) return true;
+    const FVector Known = bVisualFresh ? Awareness.LastKnownPlayerLocation : ContextMemory.ContactLocation;
+    FVector Goal; FNavPathSharedPtr Path;
     if(Purpose==EPedroMovePurpose::WatchPoint){Goal=ContextGoal;if(ContextPlanSighting.Equals(Known,.01))Path=ContextPath;ContextPath.Reset();}
     else
     {

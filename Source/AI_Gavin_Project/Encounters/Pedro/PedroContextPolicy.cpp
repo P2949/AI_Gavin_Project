@@ -10,6 +10,12 @@ namespace PedroContextPolicy
 {
 using Mode=EPedroContextMode;using Reason=EPedroContextReason;using Move=EPedroContextMovementIntent;using Look=EPedroContextAttentionIntent;
 bool ValidPoint(const FVector& V){return !V.ContainsNaN()&&FMath::Abs(V.X)<1.e12&&FMath::Abs(V.Y)<1.e12&&FMath::Abs(V.Z)<1.e12;}
+bool HasPendingContactWithin(const FPedroContextMemory& Memory, double Now, double MaxAge)
+{
+    const double Age = Now - Memory.ContactAt;
+    return Memory.bAttackPending && Memory.ContactAt >= 0 && Age >= 0 &&
+        Age <= MaxAge && ValidPoint(Memory.ContactLocation);
+}
 int32 ActivityPriority(EPedroEvidenceKind K)
 {
     switch(K){case EPedroEvidenceKind::None:return 0;case EPedroEvidenceKind::RepeatedInteraction:return 1;
