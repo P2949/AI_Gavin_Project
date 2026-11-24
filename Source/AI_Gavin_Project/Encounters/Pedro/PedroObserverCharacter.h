@@ -29,6 +29,10 @@ public:
         FVector& OutLocation,
         FRotator& OutRotation) const override;
 
+    /** This character is an observer, never a conventional killable target. */
+    virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent,
+        AController* EventInstigator, AActor* DamageCauser) override;
+
     /** Child Blueprints can adjust the eye point without changing C++. */
     UFUNCTION(BlueprintPure, Category = "Pedro|Observer")
     USceneComponent* GetObserverEye() const { return ObserverEye.Get(); }

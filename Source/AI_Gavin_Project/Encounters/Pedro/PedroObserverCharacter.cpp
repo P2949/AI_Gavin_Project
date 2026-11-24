@@ -5,14 +5,13 @@
 
 APedroObserverCharacter::APedroObserverCharacter()
 {
-    // The default CharacterMovementComponent can support navigation later.
-    // This phase intentionally supplies no autonomous behaviour or ticking AI.
+    // The AI controller owns autonomous behaviour; the character needs no actor tick.
     PrimaryActorTick.bCanEverTick = false;
     AutoPossessPlayer = EAutoReceiveInput::Disabled;
+    SetCanBeDamaged(false);
     bUseControllerRotationYaw = false;
 
-    // Do not let movement or controller facing change the test's deliberate
-    // observer orientation without a separate, explicit follow/look policy.
+    // The attention policy owns physical yaw, not ordinary movement or controller facing.
     GetCharacterMovement()->bOrientRotationToMovement = false;
     GetCharacterMovement()->bUseControllerDesiredRotation = false;
 
@@ -20,6 +19,15 @@ APedroObserverCharacter::APedroObserverCharacter()
     ObserverEye->SetupAttachment(GetRootComponent());
     ObserverEye->SetRelativeLocation(FVector(0.0, 0.0, 64.0));
     ObserverEye->SetRelativeRotation(FRotator::ZeroRotator);
+}
+
+float APedroObserverCharacter::TakeDamage(float DamageAmount,
+    const FDamageEvent& DamageEvent, AController* EventInstigator,
+    AActor* DamageCauser)
+{
+    // Real melee sweeps still deliver UMeleeAttackComponent::OnAttackHit.
+    // Damage cannot kill or make Pedro an ordinary combat opponent.
+    return 0.0f;
 }
 
 void APedroObserverCharacter::GetActorEyesViewPoint(

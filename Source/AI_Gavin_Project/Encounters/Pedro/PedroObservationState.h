@@ -187,7 +187,13 @@ struct FPedroObservationState
     {
         const bool bSupportedKnowledgeSource =
             Evidence.KnowledgeSource == EPedroKnowledgeSource::DirectObservation ||
-            Evidence.KnowledgeSource == EPedroKnowledgeSource::PrototypeAssumed;
+            Evidence.KnowledgeSource == EPedroKnowledgeSource::PrototypeAssumed ||
+            // Only the Director's verified observer-hit seam may create this provenance.
+            (Evidence.KnowledgeSource == EPedroKnowledgeSource::DirectContact &&
+             Evidence.Event.Kind == EPedroEvidenceKind::AttackedObserver &&
+             Evidence.Event.OpportunityId.IsNone() &&
+             Evidence.Event.SubjectId == FName(TEXT("PedroObserver")) &&
+             Evidence.Event.SubjectActor.IsValid());
 
         if (!Evidence.Event.EventId.IsValid() ||
             Evidence.Event.Kind == EPedroEvidenceKind::None ||

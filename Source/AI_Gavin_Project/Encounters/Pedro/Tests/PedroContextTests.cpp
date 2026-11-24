@@ -53,7 +53,33 @@ PEDRO_CTX_UNIT(Persistence)
     F.I.bFresh=false;const bool Hidden=!Due();F.I.bFresh=true;F.I.bAtPoint=true;F.M.LastPointVisit=10.;const bool Dwell=!Due();
     return TestTrue(TEXT("retry boundary grants bounded watch evaluation before normal tick"),Before&&At&&Cooldown&&Active&&Hidden&&Dwell)&&B;
 }
-PEDRO_CTX_UNIT(PriorityInterrupt){FContextUnit F;F.Add();F.M.CloseSince=9;const bool A=F.Get().Mode==CM::Withdraw;F.M.CloseSince=-1;const bool B=F.Add(EPedroEvidenceKind::AttackedObserver);return TestTrue(TEXT("proximity or simulated accepted attack overrides activity"),A&&B&&F.Get().Mode==CM::Withdraw);}
+PEDRO_CTX_UNIT(PriorityInterrupt)
+{
+    FContextUnit F;
+    F.Add();
+    F.M.CloseSince = 9;
+    const bool bCloseWithdraws = F.Get().Mode == CM::Withdraw;
+    F.M.CloseSince = -1;
+    const bool bAttackAccepted = F.Add(EPedroEvidenceKind::AttackedObserver);
+    TestTrue(TEXT("Proximity or accepted attack overrides activity"),
+        bCloseWithdraws && bAttackAccepted && F.Get().Mode == CM::Withdraw);
+
+    FPedroContextMemory Contact;
+    Contact.ContactAt = 10;
+    Contact.ContactLocation = FVector(100, 0, 0);
+    TestFalse(TEXT("No pending contact"), HasPendingContactWithin(Contact, 10, 1));
+    Contact.bAttackPending = true;
+    TestTrue(TEXT("Contact age inclusive at both boundaries"),
+        HasPendingContactWithin(Contact, 10, 1) && HasPendingContactWithin(Contact, 11, 1));
+    TestFalse(TEXT("Future contact"), HasPendingContactWithin(Contact, 9, 1));
+    TestFalse(TEXT("Expired contact"), HasPendingContactWithin(Contact, 11.01, 1));
+    Contact.ContactAt = -1;
+    TestFalse(TEXT("Unset contact timestamp"), HasPendingContactWithin(Contact, 0, 2));
+    Contact.ContactAt = 10;
+    Contact.ContactLocation.X = std::numeric_limits<double>::quiet_NaN();
+    TestFalse(TEXT("Nonfinite contact location"), HasPendingContactWithin(Contact, 10, 1));
+    return true;
+}
 PEDRO_CTX_UNIT(ObservedDeparture){FContextUnit F;F.Add();F.I.Known.X+=301;F.Advance(.1);return TestTrue(TEXT("visible departure cancels hold"),F.Get().Mode==CM::FollowPlayer);}
 PEDRO_CTX_UNIT(RecentLoss){FContextUnit F;F.I.bFresh=false;F.I.bFollowActive=true;return TestTrue(TEXT("retain only existing follow"),F.Get().Mode==CM::HoldLastKnown&&F.Get().MovementIntent==MV::RetainFollow);}
 PEDRO_CTX_UNIT(ExpiredLoss){FContextUnit F;F.I.bFresh=F.I.bRecent=false;F.I.bFollowActive=true;return TestTrue(TEXT("never move on expired memory"),F.Get().MovementIntent==MV::Stop);}

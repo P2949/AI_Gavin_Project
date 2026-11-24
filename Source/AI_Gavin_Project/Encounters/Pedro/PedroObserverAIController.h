@@ -16,7 +16,7 @@ class UCharacterMovementComponent;
 class UAIPerceptionComponent;
 class UAISenseConfig_Sight;
 
-/** Opt-in peaceful observer. Spatial knowledge, opt-in attention and opt-in locomotion; no evidence. */
+/** Peaceful observer: owns perception, attention and navigation; consumes Director-approved evidence for context. */
 UCLASS()
 class AI_GAVIN_PROJECT_API APedroObserverAIController : public AAIController
 {
@@ -123,6 +123,8 @@ private:
     FNavPathSharedPtr ContextPath;
     FVector ContextGoal=FVector::ZeroVector, ContextPlanSighting=FVector::ZeroVector;
     void ReceiveContextEvidence(const APedroEncounterDirector* Director,const FPedroEvidenceRecord& Record);
+    void ReceiveVerifiedContact(const APedroEncounterDirector* Director,
+        const FPedroEvidenceRecord& Record, const FVector& FixedTraceOrigin);
     void ReceiveContextResolution(const APedroEncounterDirector* Director);
     void ResetContextMemory();
     void UpdateContext();

@@ -54,6 +54,9 @@ struct FPedroContextMemory
     TSet<FGuid> SeenEvents;
     double HoldStarted=-1, ActivityResume=0, CloseSince=-1, DisengageUntil=0, EnteredAt=0;
     double LastLoss=-1, LastPointVisit=-1, LastPointFailure=-1, AttackAt=-1;
+    // A one-time proven melee-contact direction. Never refreshed from player transform.
+    FVector ContactLocation=FVector::ZeroVector;
+    double ContactAt=-1;
     int32 LossEpisodes=0;
     bool bWasFresh=false, bSatisfied=false, bAttackPending=false;
     FName CurrentPoint, FailedPoint, LossPoint;
@@ -69,6 +72,8 @@ struct FPedroContextInput
 namespace PedroContextPolicy
 {
     bool ValidPoint(const FVector& V);
+    // A fixed contact direction is available only while the attack is pending.
+    bool HasPendingContactWithin(const FPedroContextMemory& Memory, double Now, double MaxAge);
     int32 ActivityPriority(EPedroEvidenceKind Kind);
     double ActivityDuration(int32 Priority);
     bool AcceptActivity(FPedroContextMemory& Memory,const FPedroEvidenceRecord& Record,const FVector& Known,double Now,const FPedroContextSettings& S);

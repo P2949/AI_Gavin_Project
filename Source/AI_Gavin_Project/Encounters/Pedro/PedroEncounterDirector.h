@@ -21,6 +21,10 @@ class UEncounterDefinition;
 class UPlayerInteractionComponent;
 class UPedroObservationSourceComponent;
 class FDataValidationContext;
+class APedroObserverCharacter;
+class APedroPlayableIntegrationActor;
+class APawn;
+struct FHitResult;
 
 /**
  * Coordinates the prototype Pedro encounter.
@@ -150,6 +154,9 @@ public:
 
     /** Strictly post-resolution; false during a reentrant progression callback. */
     bool HasCommittedContextResolution() const { return bCommittedContextResolution; }
+
+    /** Session progress can outlive this level's Director during hub travel. */
+    bool IsEncounterProgressResolved() const;
 
     /** Valid only after successful shared progression resolution. */
     bool HasFinalClassification() const
@@ -302,6 +309,11 @@ private:
     bool bHasShadowCompletionDecision = false;
     bool bOutcomeEvaluationQueued = false;
     bool bHasPresentedOutcome = false;
+
+    /** Trusted encounter-local adapter only; never a general gameplay event API. */
+    bool ReceiveVerifiedObserverMeleeHit(APawn* Player,
+        APedroObserverCharacter* HitObserver, const FHitResult& Hit);
+    friend class APedroPlayableIntegrationActor;
 
     // Test-only access to simulate a resolved encounter without hub setup.
     friend class FPedroDirectorAcquisitionLifecycleTest;

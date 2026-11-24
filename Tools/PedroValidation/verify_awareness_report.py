@@ -31,7 +31,9 @@ NAVIGATION_NAMES='Disabled InvalidObserver NoKnowledge FreshObservedTarget Inval
 NATIVE_NAMES |= {PREFIX+"Navigation."+name for name in NAVIGATION_NAMES}
 CONTEXT_NAMES='Disabled InvalidSettings MissingBinding NoKnowledge FollowFresh ComfortableDistance AcceptActivity ActivityPriority FixedActivity DuplicateActivity UnsupportedProvenance ExpiredActivity ActivityCap Persistence PriorityInterrupt ObservedDeparture RecentLoss ExpiredLoss WatchPointMetadata CandidateEligibility InvalidPath Score Tie Improvement Dwell LossEpisode Decay Proximity EscapeSafety NoRetreatRoute Disengage Satisfied OptIn WrongBinding AcquiredBoundary AssumedBoundary NoReplay RequestOwnership IndependentReset CommittedResolution'.split()
 NATIVE_NAMES |= {PREFIX+'Context.'+name for name in CONTEXT_NAMES}
-assert len(NATIVE_NAMES)==165
+PLAYABLE_NAMES='ContactAccepted ContactWrongKind ContactMissingObserver ContactDuplicate ContactNoCoreSample ContactClassificationDisqualification ContactLegacyProvenance'.split()
+NATIVE_NAMES |= {PREFIX+'Playable.'+name for name in PLAYABLE_NAMES}
+assert len(NATIVE_NAMES)==172
 MAP='/Game/AI_Gavin/Encounters/Pedro/Validation/L_Pedro_ObserverActorTest'
 # Protocol sequence: ID (or - for substep), step, awareness, accepted, sampled.
 # Asterisk is deliberately unconstrained only for I04: event LOS is independent
@@ -100,15 +102,15 @@ def need(condition,msg):
 
 def native(report,exit_status=0):
     tests=report['tests']; names=[t['fullTestPath'] for t in tests]
-    need(len(names)==165 and len(set(names))==165,'expected exactly 165 unique native tests')
+    need(len(names)==172 and len(set(names))==172,'expected exactly 172 unique native tests')
     need(set(names)==NATIVE_NAMES,f'native inventory differs: missing={sorted(NATIVE_NAMES-set(names))} extra={sorted(set(names)-NATIVE_NAMES)}')
     for t in tests:
         need(t['state']=='Success' and t['warnings']==0 and t['errors']==0, f'native failure: {t["fullTestPath"]}')
-    need(report['succeeded']==165,'incorrect success total')
+    need(report['succeeded']==172,'incorrect success total')
     for field in ['succeededWithWarnings','failed','notRun','inProcess']:
         need(report[field]==0,f'{field} nonzero')
-    need(exit_status==0,f'all 165 native tests passed, but native process exit {exit_status}')
-    return {'status':'PASS','baseline':125,'new':40,'total':165,'tests':sorted(names)}
+    need(exit_status==0,f'all 172 native tests passed, but native process exit {exit_status}')
+    return {'status':'PASS','baseline':125,'new':47,'total':172,'tests':sorted(names)}
 
 def native_diagnostics(report, exit_status):
     """Report test failures separately from process failures; never grants acceptance."""
@@ -255,7 +257,8 @@ UNITY_SOURCES = tuple('Source/AI_Gavin_Project/Encounters/Pedro/'+name for name 
     'Tests/PedroObserverAIControllerTests.cpp', 'Tests/PedroAwarenessWorldTests.cpp',
     'PedroAttentionPolicy.cpp','Tests/PedroAttentionTests.cpp',
     'PedroNavigationPolicy.cpp','Tests/PedroNavigationTests.cpp',
-    'PedroContextPolicy.cpp','PedroObserverWatchPoint.cpp','PedroEncounterDirector.cpp','Tests/PedroContextTests.cpp'))
+    'PedroContextPolicy.cpp','PedroObserverWatchPoint.cpp','PedroEncounterDirector.cpp','Tests/PedroContextTests.cpp',
+    'PedroPlayableIntegrationActor.cpp','Tests/PedroPlayableIntegrationTests.cpp','Tests/PedroPlayableSmoke.cpp','Tests/PedroFlowResolvedProbe.cpp','Tests/PedroFlowSmoke.cpp'))
 UNITY_NAME = r'Module\.AI_Gavin_Project(?:\.\d+)?\.cpp'
 
 def verify_unity(text, project, exit_status):

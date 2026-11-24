@@ -60,9 +60,13 @@ enum class EPedroKnowledgeSource : uint8
     /**
      * Temporary prototype-only acquisition without a perception check.
      * This is NOT an actual sighting and must not be described as witnessed.
-     * Real observer perception will eventually produce DirectObservation.
+     * Actual witnessed events use DirectObservation instead.
      */
-    PrototypeAssumed
+    PrototypeAssumed,
+
+    /** Only a verified player's physical strike against Pedro himself.
+     *  Appended: keep all existing serialized enum values intact. */
+    DirectContact
 };
 
 /**
