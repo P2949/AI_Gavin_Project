@@ -2,6 +2,12 @@
 
 This is a project for the CS4096 (artificial intelligence for games) module.
 
+Pedro Goraieb Fernandes map: /Content/AI_Gavin/World/Hub/Maps/L_Hub_Prototype.umap
+
+Caoimhe Conway map: /Content/AI_Gavin/Encounters/Caoimhe/Maps/L_Circus_Map.umap
+
+Mykhailo Fedenko map: /Content/AI_Gavin/World/Rooms/Dungeon/Dungeon.umap
+
 ## Engine Version
 
 **Unreal Engine 5.8.2**
